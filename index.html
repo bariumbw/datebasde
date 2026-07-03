@@ -211,116 +211,596 @@
         </div>
     </div>
 </div>
-    <script>
-        const API_URL = "https://script.google.com/macros/s/AKfycbwUlzfdZa213r9npr4i8Ogvp6gQmzmpubXtJDNq72k2RPav_rF1Zt7eJyh6tJfNz5DM/exec";
+
+<script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbwUlzfdZa213r9npr4i8Ogvp6gQmzmpubXtJDNq72k2RPav_rF1Zt7eJyh6tJfNz5DM/exec";
+    let configData, currentBatch, allLogs = [];
+    let currentUser = "";
+
+    function showToast() { const t = document.getElementById('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2000); }
+    function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
+    function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
+
+    async function handleLogin() {
+        showLoading();
+        const email = document.getElementById('loginEmail').value;
+        const code = document.getElementById('loginCode').value;
+        try {
+            const res = await fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`);
+            const data = await res.json();
+            if (data.success) {
+                currentUser = data.name;
+                document.getElementById('loginPage').classList.remove('active');
+                document.getElementById('appPage').classList.add('active');
+                
+                var configRes = await (await fetch(API_URL)).json();
+                configData = configRes.config;
+                await refreshBatchDisplay();
+                
+                document.getElementById('supplierSelect').innerHTML = '<option value="">請選擇</option>';
+                [...new Set(configData.map(function(r) { return r[0]; }))].forEach(function(s) {
+                    var opt = document.createElement('option'); opt.value = s; opt.text = s;
+                    document.getElementById('supplierSelect').appendChild(opt);
+                });
+                updateGiftMenu();
+                loadLogs();
+                initAutoTab();
+                hideLoading();
+            } else { 
+                alert('驗證失敗'); 
+                hideLoading(); 
+            }
+        } catch (err) {
+            alert('登入通訊錯誤');
+            hideLoading();
+        }
+    }
+
+    function initAutoTab() {
+        var binds = [
+            { id: "regStart", next: "regEnd" },
+            { id: "regEnd", next: "regBtn" },
+            { id: "actStart", next: "actEnd" },
+            { id: "actEnd", next: "actBtn" },
+            { id: "useStart", next: "useEnd" },
+            { id: "useEnd", next: "orderNo" },
+            { id: "orderNo", next: "useBtn" }
+        ];
+        binds.forEach(function(b) {
+            var el = document.getElementById(b.id);
+            if(el) {
+                el.addEventListener("keydown", function(e) {
+                    if(e.key === "Enter" || e.keyCode === 13) {
+                        e.preventDefault();
+                        var n = document.getElementById(b.next);
+                        if(n) { n.focus(); if(n.select) n.select(); }
+                    }
+                });
+            }
+        });
+    }
+
+    async function refreshBatchDisplay() {
+        currentBatch = await (await fetch(API_URL + "?action=getBatch")).text();
+        document.getElementById('batchDisplay').innerText = currentBatch;
+    }
+
+    async function loadLogs() {
+        showLoading();
+        allLogs = await (await fetch(API_URL + "?action=getLogs")).json();
+        renderLogs();
+        renderUsageSummary();
+        hideLoading();
+    }
+
+    function formatUnactivatedDetails(codes, statuses) {
+        var unactivatedCodes = [];
+        for (var i = 0; i < codes.length; i++) {
+            if (statuses[i] === "未啟動") {
+                unactivatedCodes.push(codes[i]);
+            }
+        }
+        if (unactivatedCodes.length === 0) return "";
+
+        var parsed = unactivatedCodes.map(function(c) {
+            var m = c.match(/^([A-Za-z]*)(.*)$/);
+            var prefix = m[1] || "";
+            var numStr = m[2] || "0";
+            return { prefix: prefix, num: parseInt(numStr, 10), raw: c };
+        });
+
+        parsed.sort(function(a, b) { return a.num - b.num; });
+
+        var parts = [];
+        var startObj = parsed[0];
+        var prevObj = parsed[0];
+
+        for (var i = 1; i < parsed.length; i++) {
+            var currentObj = parsed[i];
+            if (currentObj.prefix === prevObj.prefix && currentObj.num === prevObj.num + 1) {
+                prevObj = currentObj;
+            } else {
+                if (startObj.raw === prevObj.raw) {
+                    parts.push(startObj.raw);
+                } else {
+                    parts.push(startObj.raw + "-" + prevObj.raw);
+                }
+                startObj = currentObj;
+                prevObj = currentObj;
+            }
+        }
+        if (startObj.raw === prevObj.raw) {
+            parts.push(startObj.raw);
+        } else {
+            parts.push(startObj.raw + "-" + prevObj.raw);
+        }
+
+        return "(部分未啟動)" + parts.join(",") + "未啟用";
+    }
+
+    function formatAllCodesToRanges(codes) {
+        if (!codes || codes.length === 0) return "";
+        var parsed = codes.map(function(c) {
+            var m = c.match(/^([A-Za-z]*)(.*)$/);
+            var prefix = m[1] || "";
+            var numStr = m[2] || "0";
+            return { prefix: prefix, num: parseInt(numStr, 10), raw: c };
+        });
+        parsed.sort(function(a, b) { return a.num - b.num; });
+
+        var parts = [];
+        var startObj = parsed[0];
+        var prevObj = parsed[0];
+
+        for (var i = 1; i < parsed.length; i++) {
+            var currentObj = parsed[i];
+            if (currentObj.prefix === prevObj.prefix && currentObj.num === prevObj.num + 1) {
+                prevObj = currentObj;
+            } else {
+                if (startObj.raw === prevObj.raw) {
+                    parts.push(startObj.raw);
+                } else {
+                    parts.push(startObj.raw + "-" + prevObj.raw);
+                }
+                startObj = currentObj;
+                prevObj = currentObj;
+            }
+        }
+        if (startObj.raw === prevObj.raw) {
+            parts.push(startObj.raw);
+        } else {
+            parts.push(startObj.raw + "-" + prevObj.raw);
+        }
+        return parts.join(",");
+    }
+
+    function renderLogs() {
+        var fO = document.getElementById('filterOrder').value;
+        var fD = document.getElementById('filterDate').value;
+        var fU = document.getElementById('filterUser').value;
+
+        var baseLogs = allLogs.filter(function(l) {
+            var passUser = !fU || (l.data[11] || "").toString().includes(fU);
+            var isDeleted = l.data[12] === "已登記刪除";
+            return passUser && !isDeleted;
+        });
+
+        var regGroups = {};
+        baseLogs.forEach(function(l) {
+            if (fO && !((l.data[7] || "").toString().includes(fO) || (l.data[9] || "").toString().includes(fO))) return;
+            if (fD) {
+                var rDate = l.data[3] ? new Date(l.data[3]).toISOString().split('T')[0] : "";
+                if (rDate !== fD) return;
+            }
+            var batchId = l.data[0];
+            if (!batchId) return;
+            var regKey = batchId + "_" + l.data[1] + "_" + l.data[2];
+            if (!regGroups[regKey]) {
+                regGroups[regKey] = { supplier: l.data[1], gift: l.data[2], codes: [], regTime: l.data[3] };
+            }
+            regGroups[regKey].codes.push(l.data[4].toString());
+        });
+
+        var regLogBody = document.getElementById('regLogBody');
+        regLogBody.innerHTML = "";
+        Object.keys(regGroups).sort(function(a, b) {
+            var valA = parseInt(a.split('_')[0], 10) || 0;
+            var valB = parseInt(b.split('_')[0], 10) || 0;
+            return valB - valA;
+        }).forEach(function(key) {
+            var g = regGroups[key];
+            var total = g.codes.length;
+            var codeStr = formatAllCodesToRanges(g.codes);
+            var rTime = g.regTime ? new Date(g.regTime).toLocaleString() : "";
+            
+            var tr = document.createElement('tr');
+            tr.innerHTML = "<td>範圍</td><td>" + codeStr + "</td><td>" + total + "</td><td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + rTime + "</td>";
+            regLogBody.appendChild(tr);
+        });
+
+        var useGroups = {};
+        baseLogs.forEach(function(l) {
+            var batchId = l.data[0];
+            var supplier = l.data[1];
+            var giftName = l.data[2];
+            var isActivated = l.data[5]; 
+            var status = l.data[6];      
+            var useOrder = l.data[7] || "";   
+            var useTime = l.data[8] || "";    
+            var useOrder2 = l.data[9] || "";  
+            var useTime2 = l.data[10] || "";  
+            
+            if (!batchId || !supplier || !giftName) return;
+
+            if (fO && !(useOrder.toString().includes(fO) || useOrder2.toString().includes(fO))) return;
+            if (fD) {
+                var logDate = useTime ? new Date(useTime).toISOString().split('T')[0] : "";
+                var logDate2 = useTime2 ? new Date(useTime2).toISOString().split('T')[0] : "";
+                if (logDate !== fD && logDate2 !== fD) return;
+            }
+            
+            var groupKey = batchId + "_" + supplier + "_" + giftName;
+
+            if (!useGroups[groupKey]) {
+                useGroups[groupKey] = { 
+                    supplier: supplier, 
+                    gift: giftName, 
+                    codes: [], 
+                    orders1: [],
+                    times1: [],
+                    orders2: [],
+                    times2: [],
+                    activationStatuses: [],
+                    hasUsedCards: false,
+                    latestTime: 0 // 用於追蹤該群組的最近時間
+                };
+            }
+            
+            if (status === "已使用") {
+                useGroups[groupKey].hasUsedCards = true;
+                useGroups[groupKey].codes.push(l.data[4].toString()); 
+                useGroups[groupKey].activationStatuses.push(isActivated);
+
+                if (useOrder && useGroups[groupKey].orders1.indexOf(useOrder) === -1) useGroups[groupKey].orders1.push(useOrder);
+                if (useTime) { 
+                    var t1 = new Date(useTime).getTime();
+                    if (t1 > useGroups[groupKey].latestTime) useGroups[groupKey].latestTime = t1;
+                    var t1Str = new Date(useTime).toLocaleString();
+                    if (useGroups[groupKey].times1.indexOf(t1Str) === -1) useGroups[groupKey].times1.push(t1Str); 
+                }
+                if (useOrder2 && useGroups[groupKey].orders2.indexOf(useOrder2) === -1) useGroups[groupKey].orders2.push(useOrder2);
+                if (useTime2) { 
+                    var t2 = new Date(useTime2).getTime();
+                    if (t2 > useGroups[groupKey].latestTime) useGroups[groupKey].latestTime = t2;
+                    var t2Str = new Date(useTime2).toLocaleString();
+                    if (useGroups[groupKey].times2.indexOf(t2Str) === -1) useGroups[groupKey].times2.push(t2Str); 
+                }
+            }
+        });
+
+        var useLogBody = document.getElementById('useLogBody');
+        useLogBody.innerHTML = "";
         
-        // 確保所有變數結構完全保留
-        let configData, currentBatch, allLogs = [];
-        let currentUser = "";
+        // --- 排序邏輯：依照 latestTime 由新到舊（近到遠） ---
+        Object.keys(useGroups).sort(function(a, b) {
+            return useGroups[b].latestTime - useGroups[a].latestTime;
+        }).forEach(function(key) {
+            var g = useGroups[key];
+            if (!g.hasUsedCards || g.codes.length === 0) return;
 
-        // 完整保留顯示與隱藏遮罩功能
-        function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
-        function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
-        function showToast() { const t = document.getElementById('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2000); }
+            var total = g.codes.length;
+            var codeStr = formatAllCodesToRanges(g.codes);
+            var hasUnactivated = g.activationStatuses.indexOf("未啟動") !== -1;
+            var hasActivated = g.activationStatuses.indexOf("已啟動") !== -1;
+            
+            var actTdContent = "";
+            var targetUnactivatedCodes = [];
+            for(var i=0; i<g.codes.length; i++) {
+                if(g.activationStatuses[i] === "未啟動") targetUnactivatedCodes.push(g.codes[i]);
+            }
+            var unactJsonStr = JSON.stringify(targetUnactivatedCodes).replace(/"/g, '&quot;');
 
-        // 完整保留登入功能
-        async function handleLogin() {
-            showLoading();
-            const email = document.getElementById('loginEmail').value;
-            const code = document.getElementById('loginCode').value;
-            try {
-                const res = await fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`);
-                const data = await res.json();
-                if (data.success) {
-                    currentUser = data.name;
-                    document.getElementById('loginPage').classList.remove('active');
-                    document.getElementById('appPage').classList.add('active');
-                    var configRes = await (await fetch(API_URL)).json();
-                    configData = configRes.config;
-                    await refreshBatchDisplay();
-                    updateGiftMenu();
-                    loadLogs();
-                    initAutoTab();
-                    hideLoading();
-                } else { alert('驗證失敗'); hideLoading(); }
-            } catch (err) { alert('登入通訊錯誤'); hideLoading(); }
+            if (hasUnactivated && hasActivated) {
+                var detailStr = formatUnactivatedDetails(g.codes, g.activationStatuses);
+                actTdContent = "<span style='color:green; font-weight:600;'>已啟用</span><br>" + 
+                               "<span style='color:orange; font-weight:600; display:block; margin-top:4px;'>" + detailStr + "</span>" +
+                               "<button class='act-row-btn' style='margin-top:4px;' onclick='activateSelectedList(" + unactJsonStr + ")'>啟動按鈕</button>";
+            } else if (hasUnactivated) {
+                actTdContent = "<span style='color:red;'>未啟用</span><br><button class='act-row-btn' style='margin-top:4px;' onclick='activateSelectedList(" + unactJsonStr + ")'>啟動按鈕</button>";
+            } else {
+                actTdContent = "<span style='color:green; font-weight:600;'>已啟用</span>";
+            }
+
+            var tr = document.createElement('tr');
+            tr.innerHTML = "<td>範圍</td><td>" + codeStr + "</td><td>" + total + "</td><td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + (g.orders1.join("<br>") || "-") + "</td><td>" + (g.times1.join("<br>") || "-") + "</td><td>" + (g.orders2.join("<br>") || "-") + "</td><td>" + (g.times2.join("<br>") || "-") + "</td><td>" + actTdContent + "</td>";
+            useLogBody.appendChild(tr);
+        });
+
+        var sumGroups = {};
+        baseLogs.forEach(function(l) {
+            var sup = l.data[1];
+            var gift = l.data[2];
+            var isAct = l.data[5]; 
+            var isUse = l.data[6]; 
+            if(!sup || !gift) return;
+
+            var k = sup + "|||" + gift;
+            if(!sumGroups[k]) sumGroups[k] = { supplier: sup, gift: gift, unActivated: 0, unUsed: 0 };
+            if(isAct === "未啟動") sumGroups[k].unActivated++;
+            if(isUse === "未使用") sumGroups[k].unUsed++;
+        });
+
+        var summaryLogBody = document.getElementById('summaryLogBody');
+        summaryLogBody.innerHTML = "";
+        Object.keys(sumGroups).forEach(function(key) {
+            var g = sumGroups[key];
+            var tr = document.createElement('tr');
+            tr.innerHTML = "<td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + g.unActivated + " 張</td><td>" + g.unUsed + " 張</td>";
+            summaryLogBody.appendChild(tr);
+        });
+    }
+
+    function renderUsageSummary() {
+        var startInput = document.getElementById('usageStartDate').value;
+        var endInput = document.getElementById('usageEndDate').value;
+        var usageBody = document.getElementById('usageBody');
+
+        if (!startInput || !endInput) {
+            usageBody.innerHTML = '<tr><td colspan="4" style="color: #86868b;">請選擇日期區間進行篩選</td></tr>';
+            return;
         }
 
-        // 完整保留登記功能與所有原始參數
-        async function register(confirmed) { 
-            var btn = document.getElementById('regBtn');
-            btn.disabled = true; showLoading();
-            try {
-                var s = document.getElementById('supplierSelect').value;
-                var g = document.getElementById('giftSelect').value;
-                var mode = document.getElementById('regMode').value;
-                var codes = (mode === 'list') ? document.getElementById('regCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim());
-                
-                var payload = codes.map(function(c) {
-                    return { Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString() };
-                });
+        var startTime = new Date(startInput + "T00:00:00").getTime();
+        var endTime = new Date(endInput + "T23:59:59").getTime();
+        var usageGroups = {};
 
-                var res = await (await fetch(API_URL, { 
-                    method: "POST", 
-                    body: JSON.stringify({ mode: 'register', confirm: confirmed, payload: payload }) 
-                })).json();
+        allLogs.forEach(function(l) {
+            var isDeleted = l.data[12] === "已登記刪除";
+            if (isDeleted) return;
 
-                if (res.result === "confirm") {
-                    if (confirm(res.message)) { register(true); return; }
-                } else if (res.result === "success") {
-                    alert("登記完成！"); showToast(); loadLogs();
-                } else {
-                    alert("錯誤: " + res.message);
+            var sup = l.data[1];
+            var gift = l.data[2];
+            var status = l.data[6]; 
+            var useTime1 = l.data[8] ? new Date(l.data[8]).getTime() : 0;
+            var useTime2 = l.data[10] ? new Date(l.data[10]).getTime() : 0;
+
+            if (!sup || !gift) return;
+            var key = sup + "|||" + gift;
+
+            if (!usageGroups[key]) usageGroups[key] = { supplier: sup, gift: gift, totalUsedInPeriod: 0, totalUnusedAbsolute: 0 };
+
+            if (status === "已使用") {
+                if ((useTime1 >= startTime && useTime1 <= endTime) || (useTime2 >= startTime && useTime2 <= endTime)) {
+                    usageGroups[key].totalUsedInPeriod++;
                 }
-            } catch(e) { console.error(e); } finally { btn.disabled = false; hideLoading(); }
+            }
+            if (status === "未使用") usageGroups[key].totalUnusedAbsolute++;
+        });
+
+        usageBody.innerHTML = "";
+        var keys = Object.keys(usageGroups);
+        if (keys.length === 0) {
+            usageBody.innerHTML = '<tr><td colspan="4" style="color: #86868b;">此區間內無使用數據</td></tr>';
+            return;
         }
 
-        // 完整保留使用功能與邏輯
-        async function useGift(confirmed) { 
-            var btn = document.getElementById('useBtn');
-            showLoading();
-            try {
-                var mode = document.getElementById('useMode').value;
-                var codes = (mode === 'list') ? document.getElementById('useCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('useStart').value.trim(), document.getElementById('useEnd').value.trim());
-                
-                var payload = codes.map(function(c) {
-                    return { 
-                        Code: applySuffixLogic(c, window.foundData.calcType), 
-                        OrderNo: document.getElementById('orderNo').value 
-                    };
-                });
+        keys.forEach(function(key) {
+            var g = usageGroups[key];
+            var tr = document.createElement('tr');
+            tr.innerHTML = "<td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + g.totalUsedInPeriod + "</td><td>" + g.totalUnusedAbsolute + "</td>";
+            usageBody.appendChild(tr);
+        });
+    }
 
-                var res = await (await fetch(API_URL, { 
-                    method: "POST", 
-                    body: JSON.stringify({ mode: 'use', confirm: confirmed, Supplier: window.foundData.supplier, GiftName: window.foundData.gift, payload: payload }) 
-                })).json();
+    async function activateSelectedList(codes) {
+        if(!codes || codes.length === 0) return;
+        if (!confirm("您確定要啟用這批共 " + codes.length + " 筆尚未啟動的禮券嗎？")) return;
+        if (!confirm("❗系統安全核對：確認要將此批禮券狀態變更為「已啟動」嗎？")) return;
+        showLoading();
+        await executeActivation(codes);
+        hideLoading();
+    }
 
-                if (res.result === "confirm") {
-                    if (confirm(res.message)) { useGift(true); return; }
-                } else {
-                    alert("處理完成！"); showToast(); loadLogs();
-                }
-            } catch(e) { console.error(e); } finally { hideLoading(); }
+    async function activateGift() {
+        var m = document.getElementById('actMode').value;
+        var codes = (m === 'list') ? document.getElementById('actCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('actStart').value.trim(), document.getElementById('actEnd').value.trim());
+        if(codes.length === 0 || !codes[0]) { alert("請輸入有效的代碼範圍或清單！"); return; }
+        if (!confirm("您確定要啟用這批共 " + codes.length + " 筆禮券嗎？")) return;
+        if (!confirm("❗系統安全核對：確認要將此批『已使用未啟用』的禮券狀態變更為「已啟動」嗎？")) return;
+
+        var btn = document.getElementById('actBtn');
+        btn.innerText = "啟用處理中...";
+        btn.disabled = true;
+        showLoading();
+        await executeActivation(codes);
+        btn.innerText = "確認點擊啟用";
+        btn.disabled = false;
+        hideLoading();
+        document.getElementById('actStart').value = "";
+        document.getElementById('actEnd').value = "";
+        document.getElementById('actCodes').value = "";
+        document.getElementById('actTotal').innerText = "總張數: 0";
+    }
+
+    async function executeActivation(codesList) {
+        var res = await (await fetch(API_URL, {
+            method: "POST",
+            body: JSON.stringify({ mode: 'activate', payload: codesList })
+        })).json();
+
+        if(res.result === "success") {
+            alert("啟用成功！已將 " + res.count + " 筆禮券變更為已啟動狀態。");
+            showToast();
+            loadLogs();
+        } else {
+            alert("更新失敗：" + res.message);
         }
+    }
 
-        // 完整保留啟用功能
-        async function executeActivation(codesList) {
-            showLoading();
-            try {
-                var res = await (await fetch(API_URL, { 
-                    method: "POST", 
-                    body: JSON.stringify({ mode: 'activate', payload: codesList }) 
-                })).json();
-                if(res.result === "success") { alert("啟用成功！"); showToast(); loadLogs(); }
-            } catch(e) { console.error(e); } finally { hideLoading(); }
+    function switchPage(p) {
+        document.querySelectorAll('#appPage > .page').forEach(e => e.classList.remove('active'));
+        document.getElementById(p).classList.add('active');
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('nav-' + p).classList.add('active');
+        if(p === 'recordsPage' || p === 'usagePage') loadLogs();
+    }
+
+    function showSubLog(type) {
+        document.querySelectorAll('.log-section').forEach(function(s){ s.classList.remove('active'); });
+        document.getElementById('log-section-' + type).classList.add('active');
+        document.querySelectorAll('.sub-tab-btn').forEach(function(b){ b.classList.remove('active'); });
+        document.getElementById('sub-btn-' + type).classList.add('active');
+    }
+
+    function toggleMode(p, m) { 
+        document.getElementById(p + 'List').style.display = (m === 'list') ? 'block' : 'none'; 
+        document.getElementById(p + 'Range').style.display = (m === 'range') ? 'block' : 'none'; 
+    }
+    
+    function applySuffixLogic(val, type) { 
+        var s = val.toString().trim(); 
+        var match = s.match(/^([A-Za-z]*)(.*)$/);
+        var prefix = match[1] || "";
+        var numPart = match[2] || "";
+        if (type === "suffix_12") numPart = numPart.slice(-12);
+        else if (type === "suffix_1") numPart = numPart.slice(0, -1);
+        else if (type === "suffix_2") numPart = numPart.slice(0, -2);
+        return prefix + numPart; 
+    }
+
+    function getRangeCodes(start, end) { 
+        var sStr = start.toString().trim();
+        var eStr = end.toString().trim();
+        if(!sStr || !eStr) return [];
+        var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/);
+        var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/);
+        var prefix = sMatch[1] || "";
+        var sNumStr = sMatch[2] || "0";
+        var eNumStr = eMatch[2] || "0";
+        var sVal = parseInt(sNumStr, 10);
+        var eVal = parseInt(eNumStr, 10);
+        var padLen = sNumStr.length; 
+        var codes = []; 
+        for (var i = sVal; i <= eVal; i++) { 
+            codes.push(prefix + i.toString().padStart(padLen, '0')); 
+        } 
+        return codes; 
+    }
+    
+    async function register(confirmed) { 
+        var btn = document.getElementById('regBtn'); 
+        btn.innerText = "處理中..."; 
+        btn.disabled = true; 
+        showLoading();
+        var s = document.getElementById('supplierSelect').value, g = document.getElementById('giftSelect').value; 
+        if(!s || !g) { alert("請選擇供應商與項目"); btn.innerText = "確認登記"; btn.disabled = false; hideLoading(); return; }
+        var codes = (document.getElementById('regMode').value === 'list') ? document.getElementById('regCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim()); 
+        
+        var res = await (await fetch(API_URL, { 
+            method: "POST", 
+            body: JSON.stringify({
+                mode: 'register', 
+                confirm: confirmed,
+                payload: codes.map(function(c){ return {Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString()}; })
+            }) 
+        })).json(); 
+        
+        btn.innerText = "確認登記";
+        btn.disabled = false;
+        hideLoading();
+        
+        if (res.result === "confirm") {
+            if (confirm(res.message)) { register(true); }
+        } else if (res.result === "success") {
+            alert("登記完成！成功新增 " + res.count + " 筆。"); 
+            showToast();
+            document.getElementById('regStart').value = "";
+            document.getElementById('regEnd').value = "";
+            document.getElementById('regCodes').value = "";
+            document.getElementById('regTotal').innerText = "總張數: 0";
+            await refreshBatchDisplay();
+            loadLogs(); 
+        } else {
+            alert("錯誤: " + res.message);
         }
+    }
 
-        // --- 其餘您原本的所有函數 (請將您原本檔案中剩餘的函數補齊於此) ---
-        function initAutoTab() { /* 原本邏輯 */ }
-        function getRangeCodes(start, end) { /* 原本邏輯 */ }
-        function applySuffixLogic(val, type) { /* 原本邏輯 */ }
-        function loadLogs() { /* 原本邏輯 */ }
-        // ...以此類推，補齊所有您原本的 function...
-    </script>
+    async function useGift(confirmed) { 
+        var btn = document.getElementById('useBtn'); 
+        btn.innerText = "處理中..."; 
+        showLoading();
+        var s = document.getElementById('useStart').value.trim(), e = document.getElementById('useEnd').value.trim(); 
+        var codes = (document.getElementById('useMode').value === 'list') ? document.getElementById('useCodes').value.trim().split('\n') : getRangeCodes(s, e); 
+        
+        var res = await (await fetch(API_URL, { 
+            method: "POST", 
+            body: JSON.stringify({
+                mode: 'use', 
+                confirm: confirmed, 
+                Supplier: window.foundData.supplier, 
+                GiftName: window.foundData.gift, 
+                payload: codes.map(function(c){ return {Code: applySuffixLogic(c, window.foundData.calcType), OrderNo: document.getElementById('orderNo').value}; })
+            }) 
+        })).json(); 
+        
+        btn.innerText = "確認批量使用"; 
+        hideLoading();
+        if (res.result === "error") {
+            alert(res.message); 
+        } else if (res.result === "confirm") { 
+            if(confirm(res.message)) useGift(true); 
+        } else { 
+            alert("處理完成！"); 
+            showToast();
+            document.getElementById('useStart').value = "";
+            document.getElementById('useEnd').value = "";
+            document.getElementById('useCodes').value = "";
+            document.getElementById('orderNo').value = "";
+            document.getElementById('useTotal').innerText = "總張數: 0";
+            document.getElementById('useInfoDisplay').innerText = "請輸入編號...";
+            document.getElementById('useBtn').disabled = true;
+            loadLogs(); 
+        } 
+    }
+
+    function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(Boolean).length; }
+    
+    function calcTotalRange(p) { 
+        var s = document.getElementById(p + 'Start').value.trim();
+        var e = document.getElementById(p + 'End').value.trim(); 
+        if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; }
+        var sMatch = s.match(/^([A-Za-z]*)(.*)$/);
+        var eMatch = e.match(/^([A-Za-z]*)(.*)$/);
+        var sNum = parseInt(sMatch[2] || "0", 10);
+        var eNum = parseInt(eMatch[2] || "0", 10);
+        var total = (sNum && eNum && eNum >= sNum) ? (eNum - sNum + 1) : 0;
+        document.getElementById(p + 'Total').innerText = "總張數: " + total; 
+    }
+    
+    function handleSingleCheck(val) { 
+        var code = document.getElementById('useMode').value === 'list' ? val.trim().split('\n')[0] : document.getElementById('useStart').value.trim(); 
+        if(!code) return; 
+        fetch(API_URL + "?action=find&code=" + encodeURIComponent(code)).then(function(r){ return r.json(); }).then(function(res){ 
+            window.foundData = res; 
+            if (res.found) {
+                var statusText = res.used === "已使用" ? " ⚠️ 該券狀態：已使用過！" : " (未使用)";
+                document.getElementById('useInfoDisplay').innerText = "偵測到：" + res.supplier + " - " + res.gift + statusText; 
+            } else {
+                document.getElementById('useInfoDisplay').innerText = "找不到"; 
+            }
+            document.getElementById('useBtn').disabled = !res.found; 
+            calcTotalRange('use'); 
+        }); 
+    }
+    
+    function updateGiftMenu() { 
+        var s = document.getElementById('supplierSelect').value;
+        var g = document.getElementById('giftSelect'); 
+        g.innerHTML = '<option value="">請選擇</option>'; 
+        configData.filter(function(r){ return r[0] === s; }).forEach(function(r){ 
+            var opt = document.createElement('option'); opt.value = r[1]; opt.text = r[1]; g.appendChild(opt); 
+        }); 
+    }
+</script>
 </body>
 </html>
