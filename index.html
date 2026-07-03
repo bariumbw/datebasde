@@ -588,9 +588,13 @@
     // 後端啟用通用請求
     async function executeActivation(codes) {
         const res = await fetch(API_URL, {
-            method: "POST",
-            body: JSON.stringify({ mode: 'activate', payload: codes })
-        });
+                method: "POST",
+                body: JSON.stringify({
+                    mode: 'register',
+                    confirm: confirmed,
+                    payload: codes.map(c => ({ Batch: currentBatch, Supplier: sup, GiftName: gift, Code: c.toString() }))
+                }) // <--- 確保這裡正確對應，沒有多餘的括號
+            }); // <--- 這裡也要確保正確
         const data = await res.json();
         if (data.result === "success") {
             alert(`啟用成功，共${data.count}筆`);
