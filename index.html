@@ -688,43 +688,43 @@
     }
     
     async function register(confirmed) { 
-        var btn = document.getElementById('regBtn'); 
-        btn.innerText = "處理中..."; 
-        btn.disabled = true; 
-        showLoading();
-        var s = document.getElementById('supplierSelect').value, g = document.getElementById('giftSelect').value; 
-        if(!s || !g) { alert("請選擇供應商與項目"); btn.innerText = "確認登記"; btn.disabled = false; hideLoading(); return; }
-        var codes = (document.getElementById('regMode').value === 'list') ? document.getElementById('regCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim()); 
-        
-        var res = await (await fetch(API_URL, { 
-            method: "POST", 
-            body: JSON.stringify({
-                mode: 'register', 
-                confirm: confirmed,
-                payload: codes.map(function(c){ return {Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString()}; })
-            }) 
-        })).json(); 
-        
-        btn.innerText = "確認登記";
-        btn.disabled = false;
-        hideLoading();
-        
-        if (res.result === "confirm") {
-            if (confirm(res.message)) { register(true); }
-        } else if (res.result === "success") {
-            alert("登記完成！成功新增 " + res.count + " 筆。"); 
-            showToast();
-            document.getElementById('regStart').value = "";
-            document.getElementById('regEnd').value = "";
-            document.getElementById('regCodes').value = "";
-            document.getElementById('regTotal').innerText = "總張數: 0";
-            await refreshBatchDisplay();
-            loadLogs(); 
-        } else {
-            alert("錯誤: " + res.message);
-        }
+    var btn = document.getElementById('regBtn'); 
+    btn.innerText = "處理中..."; 
+    btn.disabled = true; 
+    showLoading();
+    var s = document.getElementById('supplierSelect').value, g = document.getElementById('giftSelect').value; 
+    if(!s || !g) { alert("請選擇供應商與項目"); btn.innerText = "確認登記"; btn.disabled = false; hideLoading(); return; }
+    var codes = (document.getElementById('regMode').value === 'list') ? document.getElementById('regCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim()); 
+    
+    var res = await (await fetch(API_URL, { 
+        method: "POST", 
+        body: JSON.stringify({
+            mode: 'register', 
+            confirm: confirmed,
+            // 精確修改：加入 User 欄位傳遞當前登入的人員姓名
+            payload: codes.map(function(c){ return {Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString(), User: currentUser}; })
+        }) 
+    })).json(); 
+    
+    btn.innerText = "確認登記";
+    btn.disabled = false;
+    hideLoading();
+    
+    if (res.result === "confirm") {
+        if (confirm(res.message)) { register(true); }
+    } else if (res.result === "success") {
+        alert("登記完成！成功新增 " + res.count + " 筆。"); 
+        showToast();
+        document.getElementById('regStart').value = "";
+        document.getElementById('regEnd').value = "";
+        document.getElementById('regCodes').value = "";
+        document.getElementById('regTotal').innerText = "總張數: 0";
+        await refreshBatchDisplay();
+        loadLogs(); 
+    } else {
+        alert("錯誤: " + res.message);
     }
-
+}
     async function useGift(confirmed) { 
         var btn = document.getElementById('useBtn'); 
         btn.innerText = "處理中..."; 
