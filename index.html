@@ -6,43 +6,78 @@
     <style>
         :root { --primary-pink: #ffb7c5; --dark-pink: #ff85a2; --soft-bg: #fff5f7; --text-color: #5a3e44; }
         body { font-family: sans-serif; background-color: var(--soft-bg); color: var(--text-color); padding: 20px; }
-        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(255,183,197,0.2); max-width: 600px; margin: auto; }
+        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(255,183,197,0.2); max-width: 800px; margin: auto; }
         nav { display: flex; justify-content: center; gap: 5px; margin-bottom: 20px; flex-wrap: wrap; }
         button { background: var(--dark-pink); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; }
         .page { display: none; text-align: center; }
         .active { display: block; }
         input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid var(--primary-pink); border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+        th, td { border: 1px solid #ffb7c5; padding: 8px; text-align: center; }
+        th { background: var(--primary-pink); }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <!-- 導覽列 -->
     <nav>
-        <button onclick="showPage('login')">1. 登入</button>
-        <button onclick="showPage('reg')">2. 登記</button>
-        <button onclick="showPage('act')">3. 啟用</button>
-        <button onclick="showPage('use')">4. 使用</button>
-        <button onclick="showPage('log')">5. 記錄</button>
-        <button onclick="showPage('sum')">6. 統計</button>
+        <button onclick="showPage('login')">登入</button>
+        <button onclick="showPage('reg')">登記</button>
+        <button onclick="showPage('act')">啟用</button>
+        <button onclick="showPage('use')">使用</button>
+        <button onclick="showPage('log')">記錄</button>
+        <button onclick="showPage('sum')">統計</button>
+        <button onclick="showPage('db')">Database</button>
     </nav>
 
-    <!-- 頁面內容 -->
     <div id="login" class="page active"><h2>1. 系統登入</h2><input type="email" placeholder="Email"><input type="password" placeholder="密碼"><button>進入系統</button></div>
     <div id="reg" class="page"><h2>2. 禮券登記</h2><input placeholder="輸入範圍，例如 V001-V100"><button>確認登記</button></div>
     <div id="act" class="page"><h2>3. 禮券啟用</h2><input placeholder="輸入要啟用的編號"><button>確認啟用</button></div>
     <div id="use" class="page"><h2>4. 禮券使用</h2><input placeholder="掃描編號"><input placeholder="輸入單號"><button>確認使用</button></div>
-    <div id="log" class="page"><h2>5. 流水記錄</h2><p>此處顯示篩選後的歷史操作記錄。</p></div>
-    <div id="sum" class="page"><h2>6. 使用統計</h2><p>選擇日期區間查看統計報表。</p></div>
+    <div id="log" class="page"><h2>5. 流水記錄</h2><p>此處顯示歷史操作記錄。</p></div>
+    <div id="sum" class="page"><h2>6. 使用統計</h2><p>查看統計報表。</p></div>
+    
+    <div id="db" class="page">
+        <h2>7. Database 全局總覽</h2>
+        <input type="text" id="dbSearch" placeholder="搜尋關鍵字..." oninput="renderDB()">
+        <table>
+            <thead>
+                <tr><th>時間</th><th>供應商</th><th>項目</th><th>Code</th><th>動作</th><th>單號/狀態</th><th>人員</th></tr>
+            </thead>
+            <tbody id="dbBody"></tbody>
+        </table>
+    </div>
 </div>
 
 <script>
-    // 這裡替換成您自己的 GAS 網址
     const API_URL = "https://script.google.com/macros/s/AKfycbzz1AHRjF9GsSbwwRYgQjMXc7ah4Jdz1G8zLbaKlsM1cCu6X1lm6i1oB_1DCUEUxZ2vmg/exec";
+    let allDBData = [];
 
     function showPage(id) {
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         document.getElementById(id).classList.add('active');
+        if (id === 'db') loadLogs();
+    }
+
+    async function loadLogs() {
+        try {
+            const response = await fetch(`${API_URL}?action=getDatabase`); 
+            allDBData = await response.json(); 
+            renderDB();
+        } catch (e) {
+            console.error("載入失敗", e);
+        }
+    }
+
+    function renderDB() {
+        const filter = document.getElementById('dbSearch').value.toLowerCase();
+        const tbody = document.getElementById('dbBody');
+        tbody.innerHTML = "";
+        allDBData.filter(row => row.join(' ').toLowerCase().includes(filter)).forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = row.map(cell => `<td>${cell}</td>`).join('');
+            tbody.appendChild(tr);
+        });
     }
 </script>
 
