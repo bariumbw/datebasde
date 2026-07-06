@@ -2,97 +2,49 @@
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
-    <title>禮券管理系統 (粉紅主題)</title>
+    <title>禮券管理系統</title>
     <style>
-        :root {
-            --primary-pink: #ffb7c5;
-            --dark-pink: #ff85a2;
-            --soft-bg: #fff5f7;
-            --text-color: #5a3e44;
-        }
-        body { font-family: -apple-system, sans-serif; padding: 20px; background-color: var(--soft-bg); color: var(--text-color); }
-        .hidden { display: none; }
-        
-        /* 登入遮罩層 */
-        #login-overlay { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: #ffeef2; z-index: 1000; display: flex; 
-            align-items: center; justify-content: center; 
-        }
-        
-        /* 卡片風格 */
-        .card { 
-            background: white; border: 1px solid #ffd6de; 
-            padding: 20px; border-radius: 16px; margin-bottom: 20px; 
-            box-shadow: 0 4px 12px rgba(255, 183, 197, 0.2);
-        }
-        
-        button { 
-            background-color: var(--dark-pink); color: white; border: none; 
-            padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;
-            transition: 0.3s;
-        }
-        button:hover { background-color: #ff6b8d; }
-        
-        input, select { 
-            border: 1px solid var(--primary-pink); padding: 8px; 
-            border-radius: 8px; margin: 5px 0;
-        }
+        :root { --primary-pink: #ffb7c5; --dark-pink: #ff85a2; --soft-bg: #fff5f7; --text-color: #5a3e44; }
+        body { font-family: sans-serif; background-color: var(--soft-bg); color: var(--text-color); padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(255,183,197,0.2); max-width: 600px; margin: auto; }
+        nav { display: flex; justify-content: center; gap: 5px; margin-bottom: 20px; flex-wrap: wrap; }
+        button { background: var(--dark-pink); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; }
+        .page { display: none; text-align: center; }
+        .active { display: block; }
+        input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid var(--primary-pink); border-radius: 8px; }
     </style>
 </head>
 <body>
 
-<!-- 1. 登入系統 -->
-<div id="login-overlay">
-    <div class="card" style="text-align: center;">
-        <h2 style="color: var(--dark-pink);">甜蜜登入</h2>
-        <input type="email" id="email" placeholder="Email"><br>
-        <input type="password" id="password" placeholder="密碼"><br>
-        <button onclick="login()">進入系統</button>
-    </div>
-</div>
+<div class="card">
+    <!-- 導覽列 -->
+    <nav>
+        <button onclick="showPage('login')">1. 登入</button>
+        <button onclick="showPage('reg')">2. 登記</button>
+        <button onclick="showPage('act')">3. 啟用</button>
+        <button onclick="showPage('use')">4. 使用</button>
+        <button onclick="showPage('log')">5. 記錄</button>
+        <button onclick="showPage('sum')">6. 統計</button>
+    </nav>
 
-<!-- 主功能區 -->
-<div id="app" class="hidden">
-    <h1>禮券管理系統</h1>
-    
-    <div class="card">
-        <h3>禮券登記</h3>
-        <select id="config-select"></select>
-        <input type="text" id="batch-input" placeholder="例如: V001-V100">
-        <button onclick="register()">登記</button>
-    </div>
-
-    <div class="card">
-        <h3>掃描核銷</h3>
-        <input type="text" id="barcode" placeholder="請掃描..." autofocus>
-    </div>
-
-    <div id="stats-area"></div>
-    <div id="logs-area"></div>
+    <!-- 頁面內容 -->
+    <div id="login" class="page active"><h2>1. 系統登入</h2><input type="email" placeholder="Email"><input type="password" placeholder="密碼"><button>進入系統</button></div>
+    <div id="reg" class="page"><h2>2. 禮券登記</h2><input placeholder="輸入範圍，例如 V001-V100"><button>確認登記</button></div>
+    <div id="act" class="page"><h2>3. 禮券啟用</h2><input placeholder="輸入要啟用的編號"><button>確認啟用</button></div>
+    <div id="use" class="page"><h2>4. 禮券使用</h2><input placeholder="掃描編號"><input placeholder="輸入單號"><button>確認使用</button></div>
+    <div id="log" class="page"><h2>5. 流水記錄</h2><p>此處顯示篩選後的歷史操作記錄。</p></div>
+    <div id="sum" class="page"><h2>6. 使用統計</h2><p>選擇日期區間查看統計報表。</p></div>
 </div>
 
 <script>
-    // 這裡替換成您自己的 GAS URL
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzz1AHRjF9GsSbwwRYgQjMXc7ah4Jdz1G8zLbaKlsM1cCu6X1lm6i1oB_1DCUEUxZ2vmg/exec';
+    // 這裡替換成您自己的 GAS 網址
+    const API_URL = "https://script.google.com/macros/s/AKfycbzz1AHRjF9GsSbwwRYgQjMXc7ah4Jdz1G8zLbaKlsM1cCu6X1lm6i1oB_1DCUEUxZ2vmg/exec";
 
-    function login() {
-        // 登入邏輯
-        document.getElementById('login-overlay').style.display = 'none';
-        document.getElementById('app').classList.remove('hidden');
-        loadData();
-    }
-
-    function register() {
-        const input = document.getElementById('batch-input').value;
-        alert("已登記批次: " + input);
-        // 此處對接您的 GAS register 邏輯
-    }
-
-    function loadData() {
-        // 此處對接您的 GAS 讀取與渲染邏輯
-        console.log("系統已載入");
+    function showPage(id) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
     }
 </script>
+
 </body>
 </html>
