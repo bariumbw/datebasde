@@ -623,10 +623,14 @@
     }
 
     async function executeActivation(codesList) {
-        var res = await (await fetch(API_URL, {
-            method: "POST",
-            body: JSON.stringify({ mode: 'activate', payload: codesList })
-        })).json();
+        var res = await (await fetch(API_URL, { 
+    method: "POST", 
+    body: JSON.stringify({
+        mode: 'register', 
+        confirm: confirmed,
+        payload: codes.map(function(c){ return {Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString(), User: currentUser}; })
+    }) 
+})).json();
 
         if(res.result === "success") {
             alert("啟用成功！已將 " + res.count + " 筆禮券變更為已啟動狀態。");
