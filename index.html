@@ -34,673 +34,330 @@
         .log-section { display: none; background: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 8px; margin-top: 15px; }
         .log-section.active { display: block; }
         #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: none; justify-content: center; align-items: center; z-index: 9999; }
-        #toast { position: fixed; top: 20px; right: 20px; background: #28a745; color: white; padding: 15px; border-radius: 8px; display: none; z-index: 10000; }
+        .loading-box { background: #fff; padding: 20px 40px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-weight: bold; font-size: 16px; color: #333; }
+        .toast { position: fixed; bottom: -60px; left: 50%; transform: translateX(-50%); background: #28a745; color: white; padding: 12px 30px; border-radius: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); font-weight: 600; font-size: 14px; transition: bottom 0.4s ease, opacity 0.4s ease; opacity: 0; z-index: 10000; }
+        .toast.show { bottom: 30px; opacity: 1; }
+        .user-info { font-size: 14px; color: #555; font-weight: normal; margin-left: 10px; }
     </style>
 </head>
 <body>
 
-<div id="loadingOverlay">處理中...</div>
-<div id="toast">存檔成功！</div>
+<div id="loadingOverlay"><div class="loading-box">連線處理中，請稍候...</div></div>
+<div id="toast" class="toast">系統更新成功！</div>
 
 <div class="container">
+    <!-- 登入頁面 -->
     <div id="loginPage" class="page active">
         <h2>禮券系統驗證</h2>
-        <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
-        <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
-        <button onclick="handleLogin()" style="width:100%;">登入系統</button>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="text" id="loginEmail" placeholder="請輸入 Email">
+        </div>
+        <div class="form-group">
+            <label>密碼</label>
+            <input type="password" id="loginCode" placeholder="請輸入密碼">
+        </div>
+        <button id="loginBtn" onclick="handleLogin()">登入系統</button>
     </div>
 
-    <div id="appPage" class="page">
-        <nav style="margin-bottom:20px; display:flex; gap:10px; flex-wrap: wrap;">
-            <button id="nav-regPage" class="nav-btn active" onclick="switchPage('regPage')">禮券登記</button>
-            <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
-            <button id="nav-usePage" class="nav-btn" onclick="switchPage('usePage')">禮券使用</button>
-            <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄</button>
-            <button id="nav-usagePage" class="nav-btn" onclick="switchPage('usagePage')">使用量總數</button>
-        </nav>
+    <!-- 主操作頁面 -->
+    <div id="mainPage" class="page">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #e2e2e7; padding-bottom:10px;">
+            <div style="display:flex; gap:10px;">
+                <button id="navReg" class="nav-btn active" onclick="switchPage('reg')">禮券登記</button>
+                <button id="navAct" class="nav-btn" onclick="switchPage('act')">整批啟動</button>
+                <button id="navUse" class="nav-btn" onclick="switchPage('use')">使用登記</button>
+                <button id="navLog" class="nav-btn" onclick="switchPage('log')">流水帳記錄</button>
+            </div>
+            <div>
+                <span id="displayUser" class="user-info"></span>
+                <button onclick="handleLogout()" style="background:#8e8e93; margin-left:10px; padding:5px 10px; font-size:12px;">登出</button>
+            </div>
+        </div>
 
-        <div id="regPage" class="page active">
-            <h2>禮券登記 (Batch: <span id="batchDisplay">讀取中...</span>)</h2>
+        <!-- 1. 禮券登記 -->
+        <div id="regSec" class="log-section active">
+            <h2>禮券登記 <span id="batchDisplay" style="font-size:14px; color:#555;">(當前批次: 載入中...)</span></h2>
             <div class="reg-grid">
                 <div>
                     <div class="form-group">
+                        <label>供應商</label>
+                        <select id="supplierSelect" onchange="updateGiftSelect('reg')"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>禮券項目</label>
+                        <select id="giftSelect"></select>
+                    </div>
+                    <div class="form-group">
                         <label>輸入模式</label>
-                        <select id="regMode" onchange="toggleMode('reg', this.value)">
-                            <option value="list">清單輸入</option>
-                            <option value="range" selected>範圍輸入</option>
+                        <select id="regMode" onchange="toggleRegMode()">
+                            <option value="range">連續範圍產生</option>
+                            <option value="list">獨立條碼清單</option>
                         </select>
-                    </div>
-                    <div id="regList" style="display:none;" class="form-group">
-                        <label>Code 清單 (每行一筆)</label>
-                        <textarea id="regCodes" oninput="calcTotal('regCodes', 'regTotal')"></textarea>
-                    </div>
-                    <div id="regRange">
-                        <div class="form-group"><label>首碼 (起始)</label><input type="text" id="regStart" placeholder="掃描後自動跳格" oninput="calcTotalRange('reg')"></div>
-                        <div class="form-group"><label>尾碼 (結束)</label><input type="text" id="regEnd" placeholder="掃描後自動跳格" oninput="calcTotalRange('reg')"></div>
                     </div>
                 </div>
                 <div>
-                    <div class="form-group"><label>供應商</label><select id="supplierSelect" onchange="updateGiftMenu()"><option value="">請選擇</option></select></div>
-                    <div class="form-group"><label>禮券項目</label><select id="giftSelect"><option value="">請選擇</option></select></div>
+                    <div id="modeRange">
+                        <div class="form-group">
+                            <label>起始條碼 (16位)</label>
+                            <input type="text" id="regStart" maxlength="16" placeholder="請輸入或刷入起始條碼" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>結束條碼 (16位)</label>
+                            <input type="text" id="regEnd" maxlength="16" placeholder="請輸入或刷入結束條碼" oninput="calcTotal()">
+                        </div>
+                    </div>
+                    <div id="modeList" style="display:none;">
+                        <div class="form-group">
+                            <label>條碼清單 (每行一個)</label>
+                            <textarea id="regCodes" placeholder="請逐行輸入或刷入條碼" oninput="calcTotal()"></textarea>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:15px; font-weight:bold; color:#0071e3;" id="regTotal">總張數: 0</div>
+                    <button id="regBtn" onclick="register(false)">確認登記</button>
                 </div>
             </div>
-            <h3 id="regTotal" style="margin: 15px 0; color: #1d1d1f;">總張數: 0</h3>
-            <button id="regBtn" onclick="register(false)" style="width:100%; padding: 12px;">確認登記</button>
         </div>
 
-        <div id="actPage" class="page">
-            <h2>禮券啟用管理 (已使用未啟用)</h2>
+        <!-- 2. 整批啟動 -->
+        <div id="actSec" class="log-section">
+            <h2>整批啟動</h2>
             <div class="form-group">
-                <label>輸入模式</label>
-                <select id="actMode" onchange="toggleMode('act', this.value)">
-                    <option value="list">清單輸入</option>
-                    <option value="range" selected>範圍輸入</option>
-                </select>
+                <label>請刷入或輸入需要啟動的條碼 (每行一個)</label>
+                <textarea id="actCodes" style="height:200px;" placeholder="請逐行輸入或刷入條碼..."></textarea>
             </div>
-            <div id="actList" style="display:none;" class="form-group">
-                <label>Code 清單 (每行一筆)</label>
-                <textarea id="actCodes" oninput="calcTotal('actCodes', 'actTotal')"></textarea>
-            </div>
-            <div id="actRange">
-                <div class="form-group"><label>起始 (掃描後自動跳格)</label><input type="text" id="actStart" oninput="calcTotalRange('act')"></div>
-                <div class="form-group"><label>結束 (掃描後自動跳格)</label><input type="text" id="actEnd" oninput="calcTotalRange('act')"></div>
-            </div>
-            <h3 id="actTotal" style="margin: 15px 0; color: #1d1d1f;">總張數: 0</h3>
-            <button id="actBtn" onclick="activateGift()" style="width:100%; padding: 12px; background: #0071e3;">確認點擊啟用</button>
+            <button onclick="activateCodes()">執行整批啟動</button>
         </div>
 
-        <div id="usePage" class="page">
-            <h2>禮券使用</h2>
-            <div class="form-group">
-                <label>輸入模式</label>
-                <select id="useMode" onchange="toggleMode('use', this.value)">
-                    <option value="list">清單輸入</option>
-                    <option value="range" selected>範圍輸入</option>
-                </select>
-            </div>
-            <div id="useList" style="display:none;" class="form-group">
-                <label>Code 清單 (每行一筆)</label>
-                <textarea id="useCodes" oninput="handleSingleCheck(this.value); calcTotal('useCodes', 'useTotal')"></textarea>
-            </div>
-            <div id="useRange">
-                <div class="form-group"><label>起始 (掃描後自動跳格)</label><input type="text" id="useStart" oninput="handleSingleCheck(this.value); calcTotalRange('use')"></div>
-                <div class="form-group"><label>結束 (掃描後自動跳格)</label><input type="text" id="useEnd" oninput="handleSingleCheck(this.value); calcTotalRange('use')"></div>
-            </div>
-            <h3 id="useTotal" style="margin: 5px 0; color: #1d1d1f;">總張數: 0</h3>
-            <h3 id="useInfoDisplay" style="margin: 10px 0; color: #86868b; font-size: 14px;">請輸入編號...</h3>
-            <div class="form-group"><label>單號 (掃描後自動跳格)</label><input type="text" id="orderNo" placeholder="請輸入單號"></div>
-            <button id="useBtn" onclick="useGift(false)" style="width:100%; padding: 12px;" disabled>確認批量使用</button>
-        </div>
-
-        <div id="recordsPage" class="page">
-            <h2>流水帳記錄 <button onclick="loadLogs()" style="font-size:12px; background: #6c757d;">重新整理</button></h2>
-            <div style="background:#f9f9f9; padding:15px; border-radius:8px; margin-bottom:15px; display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
-                <input type="text" id="filterOrder" placeholder="篩選單號" oninput="renderLogs()">
-                <input type="date" id="filterDate" oninput="renderLogs()">
-                <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderLogs()">
-            </div>
-
-            <div style="margin-bottom: 15px;">
-                <button id="sub-btn-reg" class="sub-tab-btn active" onclick="showSubLog('reg')">禮券登記記錄</button>
-                <button id="sub-btn-use" class="sub-tab-btn" onclick="showSubLog('use')">禮券使用記錄</button>
-                <button id="sub-btn-sum" class="sub-tab-btn" onclick="showSubLog('sum')">庫存剩餘數量統計</button>
-            </div>
-
-            <div id="log-section-reg" class="log-section active">
-                <h3>禮券登記記錄 (按每次確認顯示)</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width:10%">模式</th><th style="width:35%">Code 範圍/內容</th><th style="width:10%">總張數</th><th style="width:15%">供應商</th><th style="width:15%">項目</th><th style="width:15%">登記時間</th>
-                        </tr>
-                    </thead>
-                    <tbody id="regLogBody"></tbody>
-                </table>
-            </div>
-
-            <div id="log-section-use" class="log-section">
-                <h3>禮券使用記錄 (按每次確認顯示)</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width:8%">模式</th><th style="width:22%">Code 範圍/內容</th><th style="width:8%">總張數</th><th style="width:12%">供應商</th><th style="width:12%">項目</th><th style="width:10%">單號</th><th style="width:10%">時間</th><th style="width:10%">單號2</th><th style="width:10%">時間2</th><th style="width:12%">啟用狀態/操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="useLogBody"></tbody>
-                </table>
-            </div>
-
-            <div id="log-section-sum" class="log-section">
-                <h3>所有禮券剩餘庫存統計表</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>供應商</th><th>禮券項目</th><th>未啟用剩餘數量</th><th>未使用剩餘數量</th>
-                        </tr>
-                    </thead>
-                    <tbody id="summaryLogBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="usagePage" class="page">
-            <h2>使用量總數</h2>
-            <div style="background:#f9f9f9; padding:15px; border-radius:8px; margin-bottom:15px; display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
-                <div class="form-group">
-                    <label>開始日期</label>
-                    <input type="date" id="usageStartDate" onchange="renderUsageSummary()">
+        <!-- 3. 使用登記 -->
+        <div id="useSec" class="log-section">
+            <h2>使用登記</h2>
+            <div class="reg-grid">
+                <div>
+                    <div class="form-group">
+                        <label>單號 1</label>
+                        <input type="text" id="useOrder" placeholder="請輸入銷售/出貨單號 1">
+                    </div>
+                    <div class="form-group">
+                        <label>單號 2 (選填)</label>
+                        <input type="text" id="useOrder2" placeholder="請輸入備用單號 2">
+                    </div>
+                    <div class="form-group">
+                        <label>條碼輸入模式</label>
+                        <select id="useMode" onchange="toggleUseMode()">
+                            <option value="range">連續範圍登記</option>
+                            <option value="list">獨立條碼清單</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>結束日期</label>
-                    <input type="date" id="usageEndDate" onchange="renderUsageSummary()">
+                <div>
+                    <div id="useModeRange">
+                        <div class="form-group">
+                            <label>起始條碼</label>
+                            <input type="text" id="useStart" placeholder="請輸入或刷入起始條碼">
+                        </div>
+                        <div class="form-group">
+                            <label>結束條碼</label>
+                            <input type="text" id="useEnd" placeholder="請輸入或刷入結束條碼">
+                        </div>
+                    </div>
+                    <div id="useModeList" style="display:none;">
+                        <div class="form-group">
+                            <label>條碼清單 (每行一個)</label>
+                            <textarea id="useCodes" placeholder="請逐行輸入或刷入條碼"></textarea>
+                        </div>
+                    </div>
+                    <button onclick="preCheckUse()">送出使用登記</button>
                 </div>
             </div>
-            <table id="usageTable">
-                <thead>
-                    <tr>
-                        <th>供應商</th>
-                        <th>項目</th>
-                        <th>總張數</th>
-                        <th>未使用剩餘數量</th>
-                    </tr>
-                </thead>
-                <tbody id="usageBody">
-                    <tr><td colspan="4" style="color: #86868b;">請選擇日期區間進行篩選</td></tr>
-                </tbody>
-            </table>
+        </div>
+
+        <!-- 4. 流水帳記錄 -->
+        <div id="logSec" class="log-section">
+            <h2>流水帳記錄</h2>
+            <div style="display:flex; gap:10px; margin-bottom:15px; align-items:center; background:#f5f5f7; padding:10px; border-radius:8px;">
+                <div>
+                    <label style="margin:0; font-size:12px;">篩選項目分頁</label>
+                    <select id="filterSheet" onchange="renderLogs()" style="padding:5px; font-size:12px; width:180px;"></select>
+                </div>
+                <div>
+                    <label style="margin:0; font-size:12px;">人員搜尋</label>
+                    <input type="text" id="filterUser" oninput="renderLogs()" placeholder="輸入人員名稱" style="padding:5px; font-size:12px; width:120px;">
+                </div>
+                <div style="margin-top:18px;">
+                    <button onclick="loadLogs()" style="padding:5px 10px; font-size:12px; background:#28a745;">重新整理資料</button>
+                </div>
+            </div>
+            <div style="overflow-x:auto;">
+                <table id="logTable">
+                    <thead>
+                        <tr>
+                            <th style="width:50px;">批次</th>
+                            <th style="width:80px;">供應商</th>
+                            <th style="width:100px;">禮券項目</th>
+                            <th style="width:120px;">登記時間</th>
+                            <th style="width:130px;">禮券代碼</th>
+                            <th style="width:60px;">啟動</th>
+                            <th style="width:60px;">使用</th>
+                            <th style="width:100px;">單號1</th>
+                            <th style="width:100px;">單號2</th>
+                            <th style="width:70px;">人員</th>
+                            <th style="width:120px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-    const API_URL = "https://script.google.com/macros/s/AKfycbwUlzfdZa213r9npr4i8Ogvp6gQmzmpubXtJDNq72k2RPav_rF1Zt7eJyh6tJfNz5DM/exec";
-    let configData, currentBatch, allLogs = [];
-    let currentUser = "";
+const API_URL = "https://script.google.com/macros/s/AKfycbyi81vVw9TqZfB66YQ7eNqG3x5CcoT_W2p0M8e0pW4N9T40K_f86vM4kR0I3I3C9uY/exec";
 
-    function showToast() { const t = document.getElementById('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2000); }
-    function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
-    function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
+let configData = [];
+let allLogs = [];
+let currentBatch = 1;
+let currentUser = "";
 
-    async function handleLogin() {
-        showLoading();
-        const email = document.getElementById('loginEmail').value;
-        const code = document.getElementById('loginCode').value;
-        try {
-            const res = await fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`);
-            const data = await res.json();
-            if (data.success) {
-                currentUser = data.name;
-                document.getElementById('loginPage').classList.remove('active');
-                document.getElementById('appPage').classList.add('active');
-                
-                var configRes = await (await fetch(API_URL)).json();
-                configData = configRes.config;
-                await refreshBatchDisplay();
-                
-                document.getElementById('supplierSelect').innerHTML = '<option value="">請選擇</option>';
-                [...new Set(configData.map(function(r) { return r[0]; }))].forEach(function(s) {
-                    var opt = document.createElement('option'); opt.value = s; opt.text = s;
-                    document.getElementById('supplierSelect').appendChild(opt);
-                });
-                updateGiftMenu();
-                loadLogs();
-                initAutoTab();
-                hideLoading();
-            } else { 
-                alert('驗證失敗'); 
-                hideLoading(); 
-            }
-        } catch (err) {
-            alert('登入通訊錯誤');
-            hideLoading();
-        }
-    }
+function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
+function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
+function showToast() { var t = document.getElementById('toast'); t.classList.add('show'); setTimeout(function(){ t.classList.remove('show'); }, 3000); }
 
-    function initAutoTab() {
-        var binds = [
-            { id: "regStart", next: "regEnd" },
-            { id: "regEnd", next: "regBtn" },
-            { id: "actStart", next: "actEnd" },
-            { id: "actEnd", next: "actBtn" },
-            { id: "useStart", next: "useEnd" },
-            { id: "useEnd", next: "orderNo" },
-            { id: "orderNo", next: "useBtn" }
-        ];
-        binds.forEach(function(b) {
-            var el = document.getElementById(b.id);
-            if(el) {
-                el.addEventListener("keydown", function(e) {
-                    if(e.key === "Enter" || e.keyCode === 13) {
-                        e.preventDefault();
-                        var n = document.getElementById(b.next);
-                        if(n) { n.focus(); if(n.select) n.select(); }
-                    }
-                });
-            }
-        });
-    }
+window.onload = function() {
+    setupAutotab('regStart', 'regEnd');
+    setupAutotab('useStart', 'useEnd');
+};
 
-    async function refreshBatchDisplay() {
-        currentBatch = await (await fetch(API_URL + "?action=getBatch")).text();
-        document.getElementById('batchDisplay').innerText = currentBatch;
-    }
+function setupAutotab(id1, id2) {
+    var e1 = document.getElementById(id1), e2 = document.getElementById(id2);
+    if(!e1 || !e2) return;
+    e1.addEventListener('input', function() { if(this.value.length >= 16) { e2.focus(); e2.select(); } });
+}
 
-    async function loadLogs() {
-        showLoading();
-        allLogs = await (await fetch(API_URL + "?action=getLogs")).json();
-        renderLogs();
-        renderUsageSummary();
-        hideLoading();
-    }
-
-    function formatUnactivatedDetails(codes, statuses) {
-        var unactivatedCodes = [];
-        for (var i = 0; i < codes.length; i++) {
-            if (statuses[i] === "未啟動") {
-                unactivatedCodes.push(codes[i]);
-            }
-        }
-        if (unactivatedCodes.length === 0) return "";
-
-        var parsed = unactivatedCodes.map(function(c) {
-            var m = c.match(/^([A-Za-z]*)(.*)$/);
-            var prefix = m[1] || "";
-            var numStr = m[2] || "0";
-            return { prefix: prefix, num: parseInt(numStr, 10), raw: c };
-        });
-
-        parsed.sort(function(a, b) { return a.num - b.num; });
-
-        var parts = [];
-        var startObj = parsed[0];
-        var prevObj = parsed[0];
-
-        for (var i = 1; i < parsed.length; i++) {
-            var currentObj = parsed[i];
-            if (currentObj.prefix === prevObj.prefix && currentObj.num === prevObj.num + 1) {
-                prevObj = currentObj;
-            } else {
-                if (startObj.raw === prevObj.raw) {
-                    parts.push(startObj.raw);
-                } else {
-                    parts.push(startObj.raw + "-" + prevObj.raw);
-                }
-                startObj = currentObj;
-                prevObj = currentObj;
-            }
-        }
-        if (startObj.raw === prevObj.raw) {
-            parts.push(startObj.raw);
-        } else {
-            parts.push(startObj.raw + "-" + prevObj.raw);
-        }
-
-        return "(部分未啟動)" + parts.join(",") + "未啟用";
-    }
-
-    function formatAllCodesToRanges(codes) {
-        if (!codes || codes.length === 0) return "";
-        var parsed = codes.map(function(c) {
-            var m = c.match(/^([A-Za-z]*)(.*)$/);
-            var prefix = m[1] || "";
-            var numStr = m[2] || "0";
-            return { prefix: prefix, num: parseInt(numStr, 10), raw: c };
-        });
-        parsed.sort(function(a, b) { return a.num - b.num; });
-
-        var parts = [];
-        var startObj = parsed[0];
-        var prevObj = parsed[0];
-
-        for (var i = 1; i < parsed.length; i++) {
-            var currentObj = parsed[i];
-            if (currentObj.prefix === prevObj.prefix && currentObj.num === prevObj.num + 1) {
-                prevObj = currentObj;
-            } else {
-                if (startObj.raw === prevObj.raw) {
-                    parts.push(startObj.raw);
-                } else {
-                    parts.push(startObj.raw + "-" + prevObj.raw);
-                }
-                startObj = currentObj;
-                prevObj = currentObj;
-            }
-        }
-        if (startObj.raw === prevObj.raw) {
-            parts.push(startObj.raw);
-        } else {
-            parts.push(startObj.raw + "-" + prevObj.raw);
-        }
-        return parts.join(",");
-    }
-
-    function renderLogs() {
-        var fO = document.getElementById('filterOrder').value;
-        var fD = document.getElementById('filterDate').value;
-        var fU = document.getElementById('filterUser').value;
-
-        var baseLogs = allLogs.filter(function(l) {
-            var passUser = !fU || (l.data[11] || "").toString().includes(fU);
-            var isDeleted = l.data[12] === "已登記刪除";
-            return passUser && !isDeleted;
-        });
-
-        var regGroups = {};
-        baseLogs.forEach(function(l) {
-            if (fO && !((l.data[7] || "").toString().includes(fO) || (l.data[9] || "").toString().includes(fO))) return;
-            if (fD) {
-                var rDate = l.data[3] ? new Date(l.data[3]).toISOString().split('T')[0] : "";
-                if (rDate !== fD) return;
-            }
-            var batchId = l.data[0];
-            if (!batchId) return;
-            var regKey = batchId + "_" + l.data[1] + "_" + l.data[2];
-            if (!regGroups[regKey]) {
-                regGroups[regKey] = { supplier: l.data[1], gift: l.data[2], codes: [], regTime: l.data[3] };
-            }
-            regGroups[regKey].codes.push(l.data[4].toString());
-        });
-
-        var regLogBody = document.getElementById('regLogBody');
-        regLogBody.innerHTML = "";
-        Object.keys(regGroups).sort(function(a, b) {
-            var valA = parseInt(a.split('_')[0], 10) || 0;
-            var valB = parseInt(b.split('_')[0], 10) || 0;
-            return valB - valA;
-        }).forEach(function(key) {
-            var g = regGroups[key];
-            var total = g.codes.length;
-            var codeStr = formatAllCodesToRanges(g.codes);
-            var rTime = g.regTime ? new Date(g.regTime).toLocaleString() : "";
-            
-            var tr = document.createElement('tr');
-            tr.innerHTML = "<td>範圍</td><td>" + codeStr + "</td><td>" + total + "</td><td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + rTime + "</td>";
-            regLogBody.appendChild(tr);
-        });
-
-        var useGroups = {};
-        baseLogs.forEach(function(l) {
-            var batchId = l.data[0];
-            var supplier = l.data[1];
-            var giftName = l.data[2];
-            var isActivated = l.data[5]; 
-            var status = l.data[6];      
-            var useOrder = l.data[7] || "";   
-            var useTime = l.data[8] || "";    
-            var useOrder2 = l.data[9] || "";  
-            var useTime2 = l.data[10] || "";  
-            
-            if (!batchId || !supplier || !giftName) return;
-
-            if (fO && !(useOrder.toString().includes(fO) || useOrder2.toString().includes(fO))) return;
-            if (fD) {
-                var logDate = useTime ? new Date(useTime).toISOString().split('T')[0] : "";
-                var logDate2 = useTime2 ? new Date(useTime2).toISOString().split('T')[0] : "";
-                if (logDate !== fD && logDate2 !== fD) return;
-            }
-            
-            var groupKey = batchId + "_" + supplier + "_" + giftName;
-
-            if (!useGroups[groupKey]) {
-                useGroups[groupKey] = { 
-                    supplier: supplier, 
-                    gift: giftName, 
-                    codes: [], 
-                    orders1: [],
-                    times1: [],
-                    orders2: [],
-                    times2: [],
-                    activationStatuses: [],
-                    hasUsedCards: false,
-                    latestTime: 0 // 用於追蹤該群組的最近時間
-                };
-            }
-            
-            if (status === "已使用") {
-                useGroups[groupKey].hasUsedCards = true;
-                useGroups[groupKey].codes.push(l.data[4].toString()); 
-                useGroups[groupKey].activationStatuses.push(isActivated);
-
-                if (useOrder && useGroups[groupKey].orders1.indexOf(useOrder) === -1) useGroups[groupKey].orders1.push(useOrder);
-                if (useTime) { 
-                    var t1 = new Date(useTime).getTime();
-                    if (t1 > useGroups[groupKey].latestTime) useGroups[groupKey].latestTime = t1;
-                    var t1Str = new Date(useTime).toLocaleString();
-                    if (useGroups[groupKey].times1.indexOf(t1Str) === -1) useGroups[groupKey].times1.push(t1Str); 
-                }
-                if (useOrder2 && useGroups[groupKey].orders2.indexOf(useOrder2) === -1) useGroups[groupKey].orders2.push(useOrder2);
-                if (useTime2) { 
-                    var t2 = new Date(useTime2).getTime();
-                    if (t2 > useGroups[groupKey].latestTime) useGroups[groupKey].latestTime = t2;
-                    var t2Str = new Date(useTime2).toLocaleString();
-                    if (useGroups[groupKey].times2.indexOf(t2Str) === -1) useGroups[groupKey].times2.push(t2Str); 
-                }
-            }
-        });
-
-        var useLogBody = document.getElementById('useLogBody');
-        useLogBody.innerHTML = "";
-        
-        // --- 排序邏輯：依照 latestTime 由新到舊（近到遠） ---
-        Object.keys(useGroups).sort(function(a, b) {
-            return useGroups[b].latestTime - useGroups[a].latestTime;
-        }).forEach(function(key) {
-            var g = useGroups[key];
-            if (!g.hasUsedCards || g.codes.length === 0) return;
-
-            var total = g.codes.length;
-            var codeStr = formatAllCodesToRanges(g.codes);
-            var hasUnactivated = g.activationStatuses.indexOf("未啟動") !== -1;
-            var hasActivated = g.activationStatuses.indexOf("已啟動") !== -1;
-            
-            var actTdContent = "";
-            var targetUnactivatedCodes = [];
-            for(var i=0; i<g.codes.length; i++) {
-                if(g.activationStatuses[i] === "未啟動") targetUnactivatedCodes.push(g.codes[i]);
-            }
-            var unactJsonStr = JSON.stringify(targetUnactivatedCodes).replace(/"/g, '&quot;');
-
-            if (hasUnactivated && hasActivated) {
-                var detailStr = formatUnactivatedDetails(g.codes, g.activationStatuses);
-                actTdContent = "<span style='color:green; font-weight:600;'>已啟用</span><br>" + 
-                               "<span style='color:orange; font-weight:600; display:block; margin-top:4px;'>" + detailStr + "</span>" +
-                               "<button class='act-row-btn' style='margin-top:4px;' onclick='activateSelectedList(" + unactJsonStr + ")'>啟動按鈕</button>";
-            } else if (hasUnactivated) {
-                actTdContent = "<span style='color:red;'>未啟用</span><br><button class='act-row-btn' style='margin-top:4px;' onclick='activateSelectedList(" + unactJsonStr + ")'>啟動按鈕</button>";
-            } else {
-                actTdContent = "<span style='color:green; font-weight:600;'>已啟用</span>";
-            }
-
-            var tr = document.createElement('tr');
-            tr.innerHTML = "<td>範圍</td><td>" + codeStr + "</td><td>" + total + "</td><td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + (g.orders1.join("<br>") || "-") + "</td><td>" + (g.times1.join("<br>") || "-") + "</td><td>" + (g.orders2.join("<br>") || "-") + "</td><td>" + (g.times2.join("<br>") || "-") + "</td><td>" + actTdContent + "</td>";
-            useLogBody.appendChild(tr);
-        });
-
-        var sumGroups = {};
-        baseLogs.forEach(function(l) {
-            var sup = l.data[1];
-            var gift = l.data[2];
-            var isAct = l.data[5]; 
-            var isUse = l.data[6]; 
-            if(!sup || !gift) return;
-
-            var k = sup + "|||" + gift;
-            if(!sumGroups[k]) sumGroups[k] = { supplier: sup, gift: gift, unActivated: 0, unUsed: 0 };
-            if(isAct === "未啟動") sumGroups[k].unActivated++;
-            if(isUse === "未使用") sumGroups[k].unUsed++;
-        });
-
-        var summaryLogBody = document.getElementById('summaryLogBody');
-        summaryLogBody.innerHTML = "";
-        Object.keys(sumGroups).forEach(function(key) {
-            var g = sumGroups[key];
-            var tr = document.createElement('tr');
-            tr.innerHTML = "<td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + g.unActivated + " 張</td><td>" + g.unUsed + " 張</td>";
-            summaryLogBody.appendChild(tr);
-        });
-    }
-
-    function renderUsageSummary() {
-        var startInput = document.getElementById('usageStartDate').value;
-        var endInput = document.getElementById('usageEndDate').value;
-        var usageBody = document.getElementById('usageBody');
-
-        if (!startInput || !endInput) {
-            usageBody.innerHTML = '<tr><td colspan="4" style="color: #86868b;">請選擇日期區間進行篩選</td></tr>';
-            return;
-        }
-
-        var startTime = new Date(startInput + "T00:00:00").getTime();
-        var endTime = new Date(endInput + "T23:59:59").getTime();
-        var usageGroups = {};
-
-        allLogs.forEach(function(l) {
-            var isDeleted = l.data[12] === "已登記刪除";
-            if (isDeleted) return;
-
-            var sup = l.data[1];
-            var gift = l.data[2];
-            var status = l.data[6]; 
-            var useTime1 = l.data[8] ? new Date(l.data[8]).getTime() : 0;
-            var useTime2 = l.data[10] ? new Date(l.data[10]).getTime() : 0;
-
-            if (!sup || !gift) return;
-            var key = sup + "|||" + gift;
-
-            if (!usageGroups[key]) usageGroups[key] = { supplier: sup, gift: gift, totalUsedInPeriod: 0, totalUnusedAbsolute: 0 };
-
-            if (status === "已使用") {
-                if ((useTime1 >= startTime && useTime1 <= endTime) || (useTime2 >= startTime && useTime2 <= endTime)) {
-                    usageGroups[key].totalUsedInPeriod++;
-                }
-            }
-            if (status === "未使用") usageGroups[key].totalUnusedAbsolute++;
-        });
-
-        usageBody.innerHTML = "";
-        var keys = Object.keys(usageGroups);
-        if (keys.length === 0) {
-            usageBody.innerHTML = '<tr><td colspan="4" style="color: #86868b;">此區間內無使用數據</td></tr>';
-            return;
-        }
-
-        keys.forEach(function(key) {
-            var g = usageGroups[key];
-            var tr = document.createElement('tr');
-            tr.innerHTML = "<td>" + g.supplier + "</td><td>" + g.gift + "</td><td>" + g.totalUsedInPeriod + "</td><td>" + g.totalUnusedAbsolute + "</td>";
-            usageBody.appendChild(tr);
-        });
-    }
-
-    async function activateSelectedList(codes) {
-        if(!codes || codes.length === 0) return;
-        if (!confirm("您確定要啟用這批共 " + codes.length + " 筆尚未啟動的禮券嗎？")) return;
-        if (!confirm("❗系統安全核對：確認要將此批禮券狀態變更為「已啟動」嗎？")) return;
-        showLoading();
-        await executeActivation(codes);
-        hideLoading();
-    }
-
-    async function activateGift() {
-        var m = document.getElementById('actMode').value;
-        var codes = (m === 'list') ? document.getElementById('actCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('actStart').value.trim(), document.getElementById('actEnd').value.trim());
-        if(codes.length === 0 || !codes[0]) { alert("請輸入有效的代碼範圍或清單！"); return; }
-        if (!confirm("您確定要啟用這批共 " + codes.length + " 筆禮券嗎？")) return;
-        if (!confirm("❗系統安全核對：確認要將此批『已使用未啟用』的禮券狀態變更為「已啟動」嗎？")) return;
-
-        var btn = document.getElementById('actBtn');
-        btn.innerText = "啟用處理中...";
-        btn.disabled = true;
-        showLoading();
-        await executeActivation(codes);
-        btn.innerText = "確認點擊啟用";
-        btn.disabled = false;
-        hideLoading();
-        document.getElementById('actStart').value = "";
-        document.getElementById('actEnd').value = "";
-        document.getElementById('actCodes').value = "";
-        document.getElementById('actTotal').innerText = "總張數: 0";
-    }
-
-    async function executeActivation(codesList) {
-        var res = await (await fetch(API_URL, { 
-    method: "POST", 
-    body: JSON.stringify({
-        mode: 'register', 
-        confirm: confirmed,
-        payload: codes.map(function(c){ return {Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString(), User: currentUser}; })
-    }) 
-})).json();
-
-        if(res.result === "success") {
-            alert("啟用成功！已將 " + res.count + " 筆禮券變更為已啟動狀態。");
-            showToast();
-            loadLogs();
-        } else {
-            alert("更新失敗：" + res.message);
-        }
-    }
-
-    function switchPage(p) {
-        document.querySelectorAll('#appPage > .page').forEach(e => e.classList.remove('active'));
-        document.getElementById(p).classList.add('active');
-        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('nav-' + p).classList.add('active');
-        if(p === 'recordsPage' || p === 'usagePage') loadLogs();
-    }
-
-    function showSubLog(type) {
-        document.querySelectorAll('.log-section').forEach(function(s){ s.classList.remove('active'); });
-        document.getElementById('log-section-' + type).classList.add('active');
-        document.querySelectorAll('.sub-tab-btn').forEach(function(b){ b.classList.remove('active'); });
-        document.getElementById('sub-btn-' + type).classList.add('active');
-    }
-
-    function toggleMode(p, m) { 
-        document.getElementById(p + 'List').style.display = (m === 'list') ? 'block' : 'none'; 
-        document.getElementById(p + 'Range').style.display = (m === 'range') ? 'block' : 'none'; 
-    }
+async function handleLogin() {
+    var email = document.getElementById('loginEmail').value.trim();
+    var code = document.getElementById('loginCode').value.trim();
+    if (!email || !code) { alert("請填寫 Email 與密碼"); return; }
     
-    function applySuffixLogic(val, type) { 
-        var s = val.toString().trim(); 
-        var match = s.match(/^([A-Za-z]*)(.*)$/);
-        var prefix = match[1] || "";
-        var numPart = match[2] || "";
-        if (type === "suffix_12") numPart = numPart.slice(-12);
-        else if (type === "suffix_1") numPart = numPart.slice(0, -1);
-        else if (type === "suffix_2") numPart = numPart.slice(0, -2);
-        return prefix + numPart; 
-    }
-
-    function getRangeCodes(start, end) { 
-        var sStr = start.toString().trim();
-        var eStr = end.toString().trim();
-        if(!sStr || !eStr) return [];
-        var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/);
-        var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/);
-        var prefix = sMatch[1] || "";
-        var sNumStr = sMatch[2] || "0";
-        var eNumStr = eMatch[2] || "0";
-        var sVal = parseInt(sNumStr, 10);
-        var eVal = parseInt(eNumStr, 10);
-        var padLen = sNumStr.length; 
-        var codes = []; 
-        for (var i = sVal; i <= eVal; i++) { 
-            codes.push(prefix + i.toString().padStart(padLen, '0')); 
-        } 
-        return codes; 
-    }
-    
-    async function register(confirmed) { 
-    var btn = document.getElementById('regBtn'); 
-    btn.innerText = "處理中..."; 
-    btn.disabled = true; 
+    var btn = document.getElementById('loginBtn');
+    btn.innerText = "驗證中...";
+    btn.disabled = true;
     showLoading();
-    var s = document.getElementById('supplierSelect').value, g = document.getElementById('giftSelect').value; 
-    if(!s || !g) { alert("請選擇供應商與項目"); btn.innerText = "確認登記"; btn.disabled = false; hideLoading(); return; }
-    var codes = (document.getElementById('regMode').value === 'list') ? document.getElementById('regCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim()); 
     
-    async function register(confirmed) { 
+    try {
+        var res = await (await fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`)).json();
+        if (res.success) {
+            currentUser = res.name;
+            document.getElementById('displayUser').innerText = "登入者: " + currentUser;
+            document.getElementById('loginPage').classList.remove('active');
+            document.getElementById('mainPage').classList.add('active');
+            await initSystem();
+        } else {
+            alert("驗證失敗，請檢查 Email 或密碼是否正確");
+            btn.innerText = "登入系統";
+            btn.disabled = false;
+        }
+    } catch(err) {
+        alert("連線發送錯誤: " + err);
+        btn.innerText = "登入系統";
+        btn.disabled = false;
+    } finally {
+        hideLoading();
+    }
+}
+
+function handleLogout() {
+    currentUser = "";
+    document.getElementById('loginEmail').value = "";
+    document.getElementById('loginCode').value = "";
+    document.getElementById('loginBtn').innerText = "登入系統";
+    document.getElementById('loginBtn').disabled = false;
+    document.getElementById('mainPage').classList.remove('active');
+    document.getElementById('loginPage').classList.add('active');
+}
+
+async function initSystem() {
+    showLoading();
+    try {
+        var res = await (await fetch(API_URL)).json();
+        configData = res.config;
+        populateSupplierSelects();
+        await refreshBatchDisplay();
+        await loadLogs();
+    } catch(e) { alert("系統初始化載入失敗"); }
+    hideLoading();
+}
+
+async function refreshBatchDisplay() {
+    try {
+        var b = await (await fetch(`${API_URL}?action=getBatch`)).text();
+        currentBatch = parseInt(b) || 1;
+        document.getElementById('batchDisplay').innerText = "(當前批次: " + currentBatch + ")";
+    } catch(e) { console.log("取得批次失敗"); }
+}
+
+function populateSupplierSelects() {
+    var sSelect = document.getElementById('supplierSelect');
+    sSelect.innerHTML = '<option value="">--請選擇--</option>';
+    var sups = [];
+    configData.forEach(function(r) { if(sups.indexOf(r[0]) === -1) sups.push(r[0]); });
+    sups.forEach(function(s) { sSelect.innerHTML += `<option value="${s}">${s}</option>`; });
+}
+
+function updateGiftSelect(type) {
+    var s = document.getElementById('supplierSelect').value;
+    var gSelect = document.getElementById('giftSelect');
+    gSelect.innerHTML = '<option value="">--請選擇--</option>';
+    if(!s) return;
+    configData.forEach(function(r) {
+        if(r[0] === s) { gSelect.innerHTML += `<option value="${r[1]}">${r[1]}</option>`; }
+    });
+}
+
+function toggleRegMode() {
+    var m = document.getElementById('regMode').value;
+    document.getElementById('modeRange').style.display = (m === 'range') ? 'block' : 'none';
+    document.getElementById('modeList').style.display = (m === 'list') ? 'block' : 'none';
+    calcTotal();
+}
+function toggleUseMode() {
+    var m = document.getElementById('useMode').value;
+    document.getElementById('useModeRange').style.display = (m === 'range') ? 'block' : 'none';
+    document.getElementById('useModeList').style.display = (m === 'list') ? 'block' : 'none';
+}
+
+function calcTotal() {
+    var m = document.getElementById('regMode').value;
+    var total = 0;
+    if (m === 'range') {
+        var start = document.getElementById('regStart').value.trim();
+        var end = document.getElementById('regEnd').value.trim();
+        if(start && end && start.length === end.length) {
+            var diff = BigInt(end) - BigInt(start);
+            total = diff >= 0N ? Number(diff) + 1 : 0;
+        }
+    } else {
+        var val = document.getElementById('regCodes').value.trim();
+        total = val ? val.split('\n').filter(function(x){return x.trim() !== "";}).length : 0;
+    }
+    document.getElementById('regTotal').innerText = "總張數: " + total;
+}
+
+function getRangeCodes(startStr, endStr) {
+    var codes = [];
+    var startNum = BigInt(startStr);
+    var endNum = BigInt(endStr);
+    var len = startStr.length;
+    for (var n = startNum; n <= endNum; n++) {
+        var s = n.toString();
+        while(s.length < len) { s = "0" + s; }
+        codes.push(s);
+    }
+    return codes;
+}
+
+async function register(confirmed) { 
     var btn = document.getElementById('regBtn'); 
     btn.innerText = "處理中..."; 
     btn.disabled = true; 
@@ -714,7 +371,7 @@
         body: JSON.stringify({
             mode: 'register', 
             confirm: confirmed,
-            // 精確修改點：將當前登入的 currentUser 傳給後端
+            // 確保留水帳與 A 部門分頁同步帶入當前操作人員
             payload: codes.map(function(c){ return {Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString(), User: currentUser}; })
         }) 
     })).json(); 
@@ -738,82 +395,174 @@
         alert("錯誤: " + res.message);
     }
 }
-    async function useGift(confirmed) { 
-        var btn = document.getElementById('useBtn'); 
-        btn.innerText = "處理中..."; 
-        showLoading();
-        var s = document.getElementById('useStart').value.trim(), e = document.getElementById('useEnd').value.trim(); 
-        var codes = (document.getElementById('useMode').value === 'list') ? document.getElementById('useCodes').value.trim().split('\n') : getRangeCodes(s, e); 
-        
-        var res = await (await fetch(API_URL, { 
-            method: "POST", 
-            body: JSON.stringify({
-                mode: 'use', 
-                confirm: confirmed, 
-                Supplier: window.foundData.supplier, 
-                GiftName: window.foundData.gift, 
-                payload: codes.map(function(c){ return {Code: applySuffixLogic(c, window.foundData.calcType), OrderNo: document.getElementById('orderNo').value}; })
-            }) 
-        })).json(); 
-        
-        btn.innerText = "確認批量使用"; 
-        hideLoading();
-        if (res.result === "error") {
-            alert(res.message); 
-        } else if (res.result === "confirm") { 
-            if(confirm(res.message)) useGift(true); 
-        } else { 
-            alert("處理完成！"); 
-            showToast();
-            document.getElementById('useStart').value = "";
-            document.getElementById('useEnd').value = "";
-            document.getElementById('useCodes').value = "";
-            document.getElementById('orderNo').value = "";
-            document.getElementById('useTotal').innerText = "總張數: 0";
-            document.getElementById('useInfoDisplay').innerText = "請輸入編號...";
-            document.getElementById('useBtn').disabled = true;
-            loadLogs(); 
-        } 
-    }
 
-    function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(Boolean).length; }
+async function activateCodes() {
+    var txt = document.getElementById('actCodes').value.trim();
+    if(!txt) { alert("請輸入條碼"); return; }
+    var codes = txt.split('\n').map(function(c){return c.trim();}).filter(function(c){return c!=="";});
+    showLoading();
+    var res = await (await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activate', payload: codes }) })).json();
+    hideLoading();
+    if(res.result === 'success') {
+        alert("啟動程序處理完畢，共媒合成功並啟動 " + res.count + " 張禮券！");
+        document.getElementById('actCodes').value = "";
+        loadLogs();
+    }
+}
+
+async function preCheckUse() {
+    var orderNo = document.getElementById('useOrder').value.trim();
+    var orderNo2 = document.getElementById('useOrder2').value.trim();
+    if(!orderNo) { alert("請填寫單號 1"); return; }
     
-    function calcTotalRange(p) { 
-        var s = document.getElementById(p + 'Start').value.trim();
-        var e = document.getElementById(p + 'End').value.trim(); 
-        if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; }
-        var sMatch = s.match(/^([A-Za-z]*)(.*)$/);
-        var eMatch = e.match(/^([A-Za-z]*)(.*)$/);
-        var sNum = parseInt(sMatch[2] || "0", 10);
-        var eNum = parseInt(eMatch[2] || "0", 10);
-        var total = (sNum && eNum && eNum >= sNum) ? (eNum - sNum + 1) : 0;
-        document.getElementById(p + 'Total').innerText = "總張數: " + total; 
+    var codes = [];
+    if(document.getElementById('useMode').value === 'range') {
+        var start = document.getElementById('useStart').value.trim(), end = document.getElementById('useEnd').value.trim();
+        if(!start || !end) { alert("請填寫起始與結束條碼"); return; }
+        codes = getRangeCodes(start, end);
+    } else {
+        var txt = document.getElementById('useCodes').value.trim();
+        if(!txt) { alert("請輸入條碼清單"); return; }
+        codes = txt.split('\n').map(function(c){return c.trim();}).filter(function(c){return c!=="";});
     }
     
-    function handleSingleCheck(val) { 
-        var code = document.getElementById('useMode').value === 'list' ? val.trim().split('\n')[0] : document.getElementById('useStart').value.trim(); 
-        if(!code) return; 
-        fetch(API_URL + "?action=find&code=" + encodeURIComponent(code)).then(function(r){ return r.json(); }).then(function(res){ 
-            window.foundData = res; 
-            if (res.found) {
-                var statusText = res.used === "已使用" ? " ⚠️ 該券狀態：已使用過！" : " (未使用)";
-                document.getElementById('useInfoDisplay').innerText = "偵測到：" + res.supplier + " - " + res.gift + statusText; 
-            } else {
-                document.getElementById('useInfoDisplay').innerText = "找不到"; 
-            }
-            document.getElementById('useBtn').disabled = !res.found; 
-            calcTotalRange('use'); 
-        }); 
-    }
+    showLoading();
+    var firstCode = codes[0];
+    var findRes = await (await fetch(`${API_URL}?action=find&code=${firstCode}`)).json();
+    hideLoading();
     
-    function updateGiftMenu() { 
-        var s = document.getElementById('supplierSelect').value;
-        var g = document.getElementById('giftSelect'); 
-        g.innerHTML = '<option value="">請選擇</option>'; 
-        configData.filter(function(r){ return r[0] === s; }).forEach(function(r){ 
-            var opt = document.createElement('option'); opt.value = r[1]; opt.text = r[1]; g.appendChild(opt); 
-        }); 
+    if(!findRes.found) {
+        alert("錯誤：在資料庫中找不到起始條碼 [" + firstCode + "] 登記記錄，無法對齊供應商與項目！");
+        return;
     }
+    executeUse(findRes.supplier, findRes.gift, orderNo, orderNo2, codes, false);
+}
+
+async function executeUse(supplier, gift, orderNo, orderNo2, codes, confirmed) {
+    showLoading();
+    var res = await (await fetch(API_URL, {
+        method: "POST",
+        body: JSON.stringify({
+            mode: 'use', Supplier: supplier, GiftName: gift, OrderNo: orderNo, OrderNo2: orderNo2, confirm: confirmed,
+            payload: codes.map(function(c){ return {Code: c}; })
+        })
+    })).json();
+    hideLoading();
+    
+    if(res.result === 'confirm') {
+        if(confirm(res.message)) { executeUse(supplier, gift, orderNo, orderNo2, codes, true); }
+    } else if(res.result === 'success') {
+        alert("使用登記成功！");
+        showToast();
+        document.getElementById('useStart').value = "";
+        document.getElementById('useEnd').value = "";
+        document.getElementById('useCodes').value = "";
+        loadLogs();
+    } else {
+        alert("失敗：" + res.message);
+    }
+}
+
+async function loadLogs() {
+    try {
+        var res = await (await fetch(`${API_URL}?action=getLogs`)).json();
+        allLogs = res;
+        
+        var fSelect = document.getElementById('filterSheet');
+        var prevVal = fSelect.value;
+        var sheets = [];
+        allLogs.forEach(function(l){ if(sheets.indexOf(l.sheet) === -1) sheets.push(l.sheet); });
+        
+        fSelect.innerHTML = '<option value="">--顯示全部項目--</option>';
+        sheets.forEach(function(s){ fSelect.innerHTML += `<option value="${s}">${s}</option>`; });
+        if(prevVal) fSelect.value = prevVal;
+        
+        renderLogs();
+    } catch(e) { console.log("載入流水帳失敗"); }
+}
+
+function renderLogs() {
+    var fSheet = document.getElementById('filterSheet').value;
+    var fU = document.getElementById('filterUser').value.trim().toLowerCase();
+    var tbody = document.getElementById('logBody');
+    tbody.innerHTML = "";
+    
+    var filtered = allLogs.filter(function(l) {
+        // 精確排除 B 部門專用的 All_Register_Logs 總表分頁，不重複渲染至 A 部門前端記錄
+        if (l.sheet === "All_Register_Logs") return false;
+        var passSheet = !fSheet || l.sheet === fSheet;
+        var passUser = !fU || (l.data[11] || "").toString().toLowerCase().includes(fU);
+        return passSheet && passUser;
+    });
+    
+    // 由新到舊排序
+    filtered.sort(function(a,b) { return b.data[0] - a.data[0]; });
+    
+    filtered.forEach(function(l) {
+        var d = l.data;
+        var isDeleted = d[12] === "已登記刪除";
+        var tr = document.createElement('tr');
+        if(isDeleted) tr.style.textDecoration = "line-through";
+        
+        var tStr = d[3] ? new Date(d[3]).toLocaleString('zh-TW', {hour12:false}) : "";
+        
+        tr.innerHTML = `
+            <td>${d[0]}</td>
+            <td>${d[1]}</td>
+            <td>${d[2]}</td>
+            <td>${tStr}</td>
+            <td>${d[4]}</td>
+            <td>${d[5]}</td>
+            <td><span style="color:${d[6]==='已使用'?'red':'green'}">${d[6]}</span></td>
+            <td><input type="text" id="ord_${l.sheet}_${l.row}" value="${d[7]||''}" disabled></td>
+            <td>${d[9]||''}</td>
+            <td>${d[11]||''}</td>
+            <td>
+                ${isDeleted ? '<span style="color:gray;">已刪除</span>' : `
+                    <button class="edit-btn" id="ebtn_${l.sheet}_${l.row}" onclick="toggleEdit('${l.sheet}', ${l.row})">改單</button>
+                    <button class="del-btn" onclick="deleteRow('${l.sheet}', ${l.row})">刪</button>
+                `}
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function toggleEdit(sheet, row) {
+    var input = document.getElementById(`ord_${sheet}_${row}`);
+    var btn = document.getElementById(`ebtn_${sheet}_${row}`);
+    if(input.disabled) {
+        input.disabled = false; input.focus(); btn.innerText = "儲存"; btn.className = "save-btn";
+    } else {
+        var newVal = input.value.trim();
+        if(!newVal) { alert("單號不可為空"); return; }
+        executeEdit(sheet, row, newVal);
+    }
+}
+
+async function executeEdit(sheet, row, newVal) {
+    showLoading();
+    var res = await (await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'edit', sheet: sheet, row: row, newOrderNo: newVal }) })).json();
+    hideLoading();
+    if(res.result === 'success') { alert("單號修改成功"); loadLogs(); }
+}
+
+async function deleteRow(sheet, row) {
+    if(!confirm("確定要將此禮券標記為「已登記刪除」嗎？\n此動作將釋放此條碼的使用狀態。")) return;
+    showLoading();
+    var res = await (await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'delete', sheet: sheet, row: row }) })).json();
+    hideLoading();
+    if(res.result === 'success') { alert("已被標記刪除"); loadLogs(); }
+}
+
+function switchPage(pageId) {
+    document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
+    document.querySelectorAll('.log-section').forEach(function(s){s.classList.remove('active');});
+    if(pageId === 'reg') { document.getElementById('navReg').classList.add('active'); document.getElementById('regSec').classList.add('active'); }
+    if(pageId === 'act') { document.getElementById('navAct').classList.add('active'); document.getElementById('actSec').classList.add('active'); }
+    if(pageId === 'use') { document.getElementById('navUse').classList.add('active'); document.getElementById('useSec').classList.add('active'); }
+    if(pageId === 'log') { document.getElementById('navLog').classList.add('active'); document.getElementById('logSec').classList.add('active'); }
+}
 </script>
 </body>
 </html>
