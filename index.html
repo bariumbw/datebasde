@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>禮券全能管理系統 V3.4.5 - 穩定清洗版</title>
+    <title>禮券全能管理系統 V3.4.6 - 出庫模式強化版</title>
     <style>
     :root {
         --primary-pink: #ffb7c5;
@@ -66,7 +66,7 @@
 
 <div class="container">
     <div id="loginPage" class="page active">
-        <h2>禮券全能管理系統 V3.4.5</h2>
+        <h2>禮券全能管理系統 V3.4.6</h2>
         <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
         <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
         <button onclick="handleLogin()" style="width:100%;">登入系統</button>
@@ -167,8 +167,20 @@
             <h2>禮券使用 (出庫)</h2>
             <div class="reg-grid">
                 <div>
-                    <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetect()" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
-                    <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreview()"></div>
+                    <div class="form-group">
+                        <label>輸入模式</label>
+                        <select id="useMode" onchange="toggleUseMode(this.value)">
+                            <option value="range" selected>範圍輸入</option>
+                            <option value="list">清單輸入</option>
+                        </select>
+                    </div>
+                    <div id="useRangeSection">
+                        <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetect()" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
+                        <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreview()"></div>
+                    </div>
+                    <div id="useListSection" style="display:none;">
+                        <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectList()"></textarea></div>
+                    </div>
                 </div>
                 <div>
                     <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
@@ -179,7 +191,7 @@
             <div id="previewBox">
                 <p><strong>預覽資訊</strong></p>
                 <p>供應商: <span id="pSup"></span> | 項目: <span id="pGift"></span></p>
-                <p>範圍: <span id="pStart"></span> ~ <span id="pEnd"></span></p>
+                <p id="pRangeDisplay">範圍: <span id="pStart"></span> ~ <span id="pEnd"></span></p>
                 <p>有效日期: <span id="pExpiry"></span></p>
                 <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
                 <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong></p>
@@ -372,11 +384,30 @@
         else container.innerHTML = `<span class="status-badge status-part">部分未啟動</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
     }
 
+    function toggleUseMode(m) {
+        document.getElementById('useRangeSection').style.display = (m === 'range') ? 'block' : 'none';
+        document.getElementById('useListSection').style.display = (m === 'list') ? 'block' : 'none';
+        document.getElementById('pRangeDisplay').style.display = (m === 'range') ? 'block' : 'none';
+        useAutoPreview();
+    }
+
     async function useSmartDetect() {
         const s = document.getElementById('useStart').value.trim();
         if (!s) return;
+        await detectSupplierByCode(s);
+    }
+
+    async function useSmartDetectList() {
+        const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
+        if (codes.length > 0) {
+            await detectSupplierByCode(codes[0]);
+        }
+        useAutoPreview();
+    }
+
+    async function detectSupplierByCode(code) {
         try {
-            const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(s)}`);
+            const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`);
             const data = await res.json();
             if (data.success) {
                 document.getElementById('useSupplierSelect').value = data.supplier;
@@ -386,45 +417,39 @@
                 return;
             }
         } catch (e) {}
-        const match = giftDatabase.find(item => {
-            if (!item.rule2 || item.rule2 === 'N/A') return false;
-            const parts = item.rule2.split(':');
-            if (parts[0] === 'POS') return s.substring(parseInt(parts[1]), parseInt(parts[1]) + parts[2].length) === parts[2];
-            if (parts[0] === 'START') return s.startsWith(parts[1]);
-            return false;
-        });
-        if (match) {
-            document.getElementById('useSupplierSelect').value = match.supplier;
-            useUpdateGiftSelect();
-            document.getElementById('useGiftSelect').value = match.name;
-            useAutoPreview();
-        }
     }
 
     function useAutoPreview() {
-        const s = document.getElementById('useStart').value.trim();
-        const e = document.getElementById('useEnd').value.trim();
+        const mode = document.getElementById('useMode').value;
         const g = document.getElementById('useGiftSelect').value;
-        if (s && e && g) usePreviewData();
+        
+        if (mode === 'range') {
+            const s = document.getElementById('useStart').value.trim();
+            const e = document.getElementById('useEnd').value.trim();
+            if (s && e && g) usePreviewData(getRangeCodes(s, e), s, e);
+        } else {
+            const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
+            if (codes.length > 0 && g) usePreviewData(codes, codes[0], codes[codes.length-1]);
+        }
     }
 
-    async function usePreviewData() {
-        const s = document.getElementById('useStart').value.trim();
-        const e = document.getElementById('useEnd').value.trim();
+    async function usePreviewData(codes, displayStart, displayEnd) {
         const g = document.getElementById('useGiftSelect').value;
         const match = giftDatabase.find(i => i.name === g);
-        if (match && s && e) {
+        if (match && codes.length > 0) {
             document.getElementById('pSup').innerText = match.supplier;
             document.getElementById('pGift').innerText = match.name;
-            document.getElementById('pStart').innerText = s;
-            document.getElementById('pEnd').innerText = e;
+            document.getElementById('pStart').innerText = displayStart;
+            document.getElementById('pEnd').innerText = displayEnd;
             document.getElementById('pExpiry').innerText = calculateExpiryDate(match.rule1);
-            document.getElementById('pCount').innerText = calculateCount(s, e, match.calcType);
+            document.getElementById('pCount').innerText = codes.length;
             document.getElementById('previewBox').style.display = 'block';
             window.currentUseMatch = match;
+            window.currentUseCodes = codes;
+            
             document.getElementById('pUsageStatus').innerText = "檢查中...";
             document.getElementById('usageWarning').style.display = 'none';
-            const codes = getRangeCodes(s, e);
+            
             const res = await fetch(`${API_URL}?action=checkUsage&codes=${JSON.stringify(codes)}`);
             const data = await res.json();
             if (data.usedCodes.length > 0) {
@@ -440,18 +465,38 @@
         if (!orderNo) { alert('請填寫訂單號'); return; }
         const warningVisible = document.getElementById('usageWarning').style.display === 'block';
         if (warningVisible && !confirm("偵測到重複代碼，確定要繼續登記嗎？(將記錄在二次欄位)")) return;
+        
         showLoading();
-        const s = document.getElementById('useStart').value.trim();
-        const e = document.getElementById('useEnd').value.trim();
-        const codes = getRangeCodes(s, e);
+        const codes = window.currentUseCodes;
         const match = window.currentUseMatch;
         try {
-            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: applySuffixLogic(c, match.calcType), OrderNo: orderNo})) }) });
+            const res = await fetch(API_URL, { 
+                method: "POST", 
+                body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: applySuffixLogic(c, match.calcType), OrderNo: orderNo})) }) 
+            });
             const data = await res.json();
             if (data.result === "success") {
-                await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'insertRecord', supplier: match.supplier, gift: match.name, start: s, end: e, count: document.getElementById('pCount').innerText, user: currentUser, orderNo: orderNo, expiry: document.getElementById('pExpiry').innerText }) });
+                await fetch(API_URL, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ 
+                        action: 'insertRecord', 
+                        supplier: match.supplier, 
+                        gift: match.name, 
+                        start: codes[0], 
+                        end: codes[codes.length-1], 
+                        count: codes.length, 
+                        user: currentUser, 
+                        orderNo: orderNo, 
+                        expiry: document.getElementById('pExpiry').innerText 
+                    }) 
+                });
                 hideLoading(); showToast("已完成記錄");
-                document.getElementById('useStart').value = ""; document.getElementById('useEnd').value = ""; document.getElementById('useOrderNo').value = ""; document.getElementById('previewBox').style.display = 'none';
+                // 清空資料
+                document.getElementById('useStart').value = ""; 
+                document.getElementById('useEnd').value = ""; 
+                document.getElementById('useCodes').value = "";
+                document.getElementById('useOrderNo').value = ""; 
+                document.getElementById('previewBox').style.display = 'none';
                 loadStats();
             } else { throw new Error(data.message); }
         } catch (err) { alert("提交失敗: " + err.message); hideLoading(); }
@@ -471,11 +516,7 @@
         
         let codes = [];
         if (document.getElementById('regMode').value === 'list') {
-            // 清單輸入預處理：去空白、過濾空行
-            codes = document.getElementById('regCodes').value
-                .split('\n')
-                .map(c => c.trim())
-                .filter(c => c !== "");
+            codes = document.getElementById('regCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
         } else {
             codes = getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim());
         }
@@ -483,38 +524,21 @@
         if (codes.length === 0) { alert("請輸入有效的代碼"); hideLoading(); return; }
 
         try {
-            // 重複檢查
-            const checkRes = await fetch(API_URL, { 
-                method: "POST", 
-                body: JSON.stringify({ action: 'checkRegDuplicates', codes: codes }) 
-            });
+            const checkRes = await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: 'checkRegDuplicates', codes: codes }) });
             const checkData = await checkRes.json();
-            
             if (checkData.duplicates && checkData.duplicates.length > 0) {
                 hideLoading();
                 alert(`警告：以下代碼已入庫過，整批登記已取消！\n重複代碼：${checkData.duplicates.join(', ')}`);
                 return;
             }
-
-            // 正式登記
-            const regRes = await fetch(API_URL, { 
-                method: "POST", 
-                body: JSON.stringify({ mode: 'register', user: currentUser, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) 
-            });
+            const regRes = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) });
             const regData = await regRes.json();
-            
             if (regData.result === "success") {
                 hideLoading(); showToast("入庫成功並已同步分表"); 
-                document.getElementById('regCodes').value = "";
-                document.getElementById('regStart').value = "";
-                document.getElementById('regEnd').value = "";
-                document.getElementById('regTotal').innerText = "總張數: 0";
+                document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
                 loadStats();
             } else { throw new Error(regData.message); }
-        } catch (err) { 
-            alert("登記失敗: " + err.message + "\n\n請檢查：\n1. 代碼是否包含特殊字元\n2. API 網址是否正確\n3. 網路連線是否正常"); 
-            hideLoading(); 
-        }
+        } catch (err) { alert("登記失敗: " + err.message); hideLoading(); }
     }
 
     async function activateGift() {
