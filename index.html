@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>禮券全能管理系統 V3.4.2 - 入庫防重版</title>
+    <title>禮券全能管理系統 V3.4.5 - 穩定清洗版</title>
     <style>
     :root {
         --primary-pink: #ffb7c5;
@@ -66,7 +66,7 @@
 
 <div class="container">
     <div id="loginPage" class="page active">
-        <h2>禮券全能管理系統 V3.4.2</h2>
+        <h2>禮券全能管理系統 V3.4.5</h2>
         <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
         <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
         <button onclick="handleLogin()" style="width:100%;">登入系統</button>
@@ -123,7 +123,7 @@
                         </select>
                     </div>
                     <div id="regList" style="display:none;" class="form-group">
-                        <label>Code 清單</label>
+                        <label>Code 清單 (每行一個代碼)</label>
                         <textarea id="regCodes" oninput="calcTotal('regCodes', 'regTotal')"></textarea>
                     </div>
                     <div id="regRange">
@@ -229,6 +229,7 @@
 </div>
 
 <script>
+    // 請務必將此處更換為您的 Google Apps Script 部署網址
     const API_URL = "https://script.google.com/macros/s/AKfycbzz1AHRjF9GsSbwwRYgQjMXc7ah4Jdz1G8zLbaKlsM1cCu6X1lm6i1oB_1DCUEUxZ2vmg/exec";
     
     let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
@@ -254,7 +255,7 @@
                 await loadStats();
                 hideLoading();
             } else { alert('驗證失敗'); hideLoading(); }
-        } catch (e) { alert('系統錯誤'); hideLoading(); }
+        } catch (e) { alert('系統錯誤，請檢查 API 網址是否正確'); hideLoading(); }
     }
 
     async function refreshConfig() {
@@ -362,9 +363,8 @@
         const res = await fetch(`${API_URL}?action=checkActivation&start=${start}&end=${end}`);
         const data = await res.json();
         const container = document.getElementById(`act-status-${idx}`);
-        const isAllUnact = data.unactivatedCount === data.total;
-        const isPartUnact = data.unactivatedCount > 0 && data.unactivatedCount < data.total;
         const isAllAct = data.unactivatedCount === 0;
+        const isAllUnact = data.unactivatedCount === data.total;
         if (filter === "unact" && isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
         if (filter === "act" && !isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
         if (isAllAct) container.innerHTML = `<span class="status-badge status-act">已全啟動</span>`;
@@ -446,12 +446,15 @@
         const codes = getRangeCodes(s, e);
         const match = window.currentUseMatch;
         try {
-            await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: applySuffixLogic(c, match.calcType), OrderNo: orderNo})) }) });
-            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'insertRecord', supplier: match.supplier, gift: match.name, start: s, end: e, count: document.getElementById('pCount').innerText, user: currentUser, orderNo: orderNo, expiry: document.getElementById('pExpiry').innerText }) });
-            hideLoading(); showToast("已完成記錄");
-            document.getElementById('useStart').value = ""; document.getElementById('useEnd').value = ""; document.getElementById('useOrderNo').value = ""; document.getElementById('previewBox').style.display = 'none';
-            loadStats();
-        } catch (err) { alert("提交失敗，請重試"); hideLoading(); }
+            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: applySuffixLogic(c, match.calcType), OrderNo: orderNo})) }) });
+            const data = await res.json();
+            if (data.result === "success") {
+                await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'insertRecord', supplier: match.supplier, gift: match.name, start: s, end: e, count: document.getElementById('pCount').innerText, user: currentUser, orderNo: orderNo, expiry: document.getElementById('pExpiry').innerText }) });
+                hideLoading(); showToast("已完成記錄");
+                document.getElementById('useStart').value = ""; document.getElementById('useEnd').value = ""; document.getElementById('useOrderNo').value = ""; document.getElementById('previewBox').style.display = 'none';
+                loadStats();
+            } else { throw new Error(data.message); }
+        } catch (err) { alert("提交失敗: " + err.message); hideLoading(); }
     }
 
     async function deleteRow(i) {
@@ -465,32 +468,58 @@
         var s = document.getElementById('supplierSelect').value, g = document.getElementById('giftSelect').value;
         if(!s || !g) { alert("請選擇供應商與項目"); return; }
         showLoading();
-        var codes = (document.getElementById('regMode').value === 'list') ? document.getElementById('regCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim());
         
-        // 核心邏輯：入庫前重複檢查
+        let codes = [];
+        if (document.getElementById('regMode').value === 'list') {
+            // 清單輸入預處理：去空白、過濾空行
+            codes = document.getElementById('regCodes').value
+                .split('\n')
+                .map(c => c.trim())
+                .filter(c => c !== "");
+        } else {
+            codes = getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim());
+        }
+
+        if (codes.length === 0) { alert("請輸入有效的代碼"); hideLoading(); return; }
+
         try {
-            const checkRes = await fetch(`${API_URL}?action=checkRegDuplicates&codes=${JSON.stringify(codes)}`);
+            // 重複檢查
+            const checkRes = await fetch(API_URL, { 
+                method: "POST", 
+                body: JSON.stringify({ action: 'checkRegDuplicates', codes: codes }) 
+            });
             const checkData = await checkRes.json();
             
             if (checkData.duplicates && checkData.duplicates.length > 0) {
                 hideLoading();
                 alert(`警告：以下代碼已入庫過，整批登記已取消！\n重複代碼：${checkData.duplicates.join(', ')}`);
-                return; // 阻斷整批入庫
+                return;
             }
 
-            await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c.toString()})) }) });
-            hideLoading(); showToast("入庫成功並已同步分表"); 
-            document.getElementById('regCodes').value = "";
-            document.getElementById('regStart').value = "";
-            document.getElementById('regEnd').value = "";
-            document.getElementById('regTotal').innerText = "總張數: 0";
-            loadStats();
-        } catch (err) { alert("登記失敗"); hideLoading(); }
+            // 正式登記
+            const regRes = await fetch(API_URL, { 
+                method: "POST", 
+                body: JSON.stringify({ mode: 'register', user: currentUser, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) 
+            });
+            const regData = await regRes.json();
+            
+            if (regData.result === "success") {
+                hideLoading(); showToast("入庫成功並已同步分表"); 
+                document.getElementById('regCodes').value = "";
+                document.getElementById('regStart').value = "";
+                document.getElementById('regEnd').value = "";
+                document.getElementById('regTotal').innerText = "總張數: 0";
+                loadStats();
+            } else { throw new Error(regData.message); }
+        } catch (err) { 
+            alert("登記失敗: " + err.message + "\n\n請檢查：\n1. 代碼是否包含特殊字元\n2. API 網址是否正確\n3. 網路連線是否正常"); 
+            hideLoading(); 
+        }
     }
 
     async function activateGift() {
         var m = document.getElementById('actMode').value;
-        var codes = (m === 'list') ? document.getElementById('actCodes').value.trim().split('\n') : getRangeCodes(document.getElementById('actStart').value.trim(), document.getElementById('actEnd').value.trim());
+        var codes = (m === 'list') ? document.getElementById('actCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "") : getRangeCodes(document.getElementById('actStart').value.trim(), document.getElementById('actEnd').value.trim());
         showLoading();
         await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activate', payload: codes }) });
         hideLoading(); showToast(); loadStats();
@@ -511,7 +540,7 @@
     function calculateCount(start, end, type) { let a = start.replace(/[^0-9]/g, ''); let b = end.replace(/[^0-9]/g, ''); let valA, valB; if (type === 'suffix_1') { valA = parseInt(a.slice(0, -1), 10); valB = parseInt(b.slice(0, -1), 10); } else if (type === 'suffix_2') { valA = parseInt(a.slice(0, -2), 10); valB = parseInt(b.slice(0, -2), 10); } else if (type === 'suffix_12') { valA = parseInt(a.slice(-12), 10); valB = parseInt(b.slice(-12), 10); } else { valA = parseInt(a, 10); valB = parseInt(b, 10); } return Math.abs(valB - valA) + 1; }
     function applySuffixLogic(val, type) { var s = val.toString().trim(); var match = s.match(/^([A-Za-z]*)(.*)$/); var prefix = match[1] || ""; var numPart = match[2] || ""; if (type === "suffix_12") numPart = numPart.slice(-12); else if (type === "suffix_1") numPart = numPart.slice(0, -1); else if (type === "suffix_2") numPart = numPart.slice(0, -2); return prefix + numPart; }
     function getRangeCodes(start, end) { var sStr = start.toString().trim(); var eStr = end.toString().trim(); if(!sStr || !eStr) return []; var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/); var prefix = sMatch[1] || ""; var sNumStr = sMatch[2] || "0"; var eNumStr = eMatch[2] || "0"; var sVal = parseInt(sNumStr, 10); var eVal = parseInt(eNumStr, 10); var padLen = sNumStr.length; var codes = []; for (var i = sVal; i <= eVal; i++) { codes.push(prefix + i.toString().padStart(padLen, '0')); } return codes; }
-    function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(Boolean).length; }
+    function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(c => c.trim() !== "").length; }
     function calcTotalRange(p) { var s = document.getElementById(p + 'Start').value.trim(); var e = document.getElementById(p + 'End').value.trim(); if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; } var sMatch = s.match(/^([A-Za-z]*)(.*)$/); var eMatch = e.match(/^([A-Za-z]*)(.*)$/); var sNum = parseInt(sMatch[2] || "0", 10); var eNum = parseInt(eMatch[2] || "0", 10); var total = (sNum && eNum && eNum >= sNum) ? (eNum - sNum + 1) : 0; document.getElementById(p + 'Total').innerText = "總張數: " + total; }
 </script>
 </body>
