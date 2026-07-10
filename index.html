@@ -482,12 +482,26 @@
         const data = await res.json();
         const container = document.getElementById(`act-status-${idx}`);
         if (!container) return;
-        const isAllAct = data.unactivatedCodes.length === 0;
-        const isAllUnact = false;
+        const unactCount = data.unactivatedCodes.length;
+        const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null; // 舊後端無此欄位時為 null
+        // V3.6.4 修正：範圍內查無任何入庫代碼時，不能誤判為「已啟動」
+        if (total === 0) {
+            if (filter === "act" || filter === "unact") { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
+            container.innerHTML = `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼，可能是代碼格式不一致或尚未入庫">查無入庫記錄</span>`;
+            return;
+        }
+        const isAllAct = unactCount === 0;
         if (filter === "unact" && isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
         if (filter === "act" && !isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
-        if (isAllAct) container.innerHTML = `<span class="status-badge status-act">已全啟動</span>`;
-        else container.innerHTML = `<span class="status-badge status-unact">有未啟動</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        if (isAllAct) {
+            container.innerHTML = `<span class="status-badge status-act">已啟動</span>`;
+        } else if (total !== null && unactCount >= total) {
+            // 全部未啟動
+            container.innerHTML = `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        } else {
+            // 部分未啟動：列出未啟動代碼
+            container.innerHTML = `<span class="status-badge status-part">部分未啟動${total !== null ? ` (${unactCount}/${total})` : ''}</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        }
     }
 
     function useSmartDetectDebounced() {
@@ -562,6 +576,7 @@
         // 首碼更改了：先清空舊的供應商/項目選擇，強制重新識別
         if (lastDetectedCode !== null && code !== lastDetectedCode) {
             lastDetectedCode = null;
+            window.lastDetectInfo = null;
             document.getElementById('useSupplierSelect').value = "";
             document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
             document.getElementById('previewBox').style.display = 'none';
@@ -572,9 +587,11 @@
             const d = detectCache[code];
             if (d && d.success) {
                 lastDetectedCode = code;
-                setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}`);
+                window.lastDetectInfo = d;
+                setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，已自動去除尾碼 ${d.strippedDigits} 位）` : ''));
                 applyLocalMatch(d.supplier, d.giftName);
             } else {
+                window.lastDetectInfo = null;
                 setDetectStatus('notfound');
             }
             return;
@@ -590,9 +607,11 @@
                     if (getCurrentInputCode() !== code) return;
                     if (d && d.success) {
                         lastDetectedCode = code;
-                        setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}`);
+                        window.lastDetectInfo = d;
+                        setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，已自動去除尾碼 ${d.strippedDigits} 位）` : ''));
                         applyLocalMatch(d.supplier, d.giftName);
                     } else {
+                        window.lastDetectInfo = null;
                         setDetectStatus('notfound');
                     }
                 })
@@ -600,6 +619,18 @@
                     if (getCurrentInputCode() === code) setDetectStatus('notfound', '✗ 識別查詢失敗（網絡問題），請手動選擇或重試');
                 });
         }, 400);
+    }
+
+    // 依 calcType 去除掃描條碼的尾碼校驗位（suffix_1 去 1 位，suffix_2 去 2 位）
+    function stripCodesByCalcType(codes, calcType) {
+        const m = /^suffix_(\d+)$/.exec((calcType || '').toString().trim());
+        if (!m) return codes;
+        const n = parseInt(m[1], 10);
+        return codes.map(c => {
+            // 若代碼已經是入庫形式（識別時已確認）則不重複去尾
+            if (window.lastDetectInfo && window.lastDetectInfo.matchedCode === c) return c;
+            return c.length > n ? c.substring(0, c.length - n) : c;
+        });
     }
 
     function applyLocalMatch(supplier, giftName) {
@@ -639,11 +670,12 @@
         
         const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
         if (match) {
-            const displayStart = codes[0], displayEnd = codes[codes.length - 1];
+            // suffix 計算類型：掃描條碼比入庫代碼多 N 位校驗碼，需去尾後才能對上 GiftStatus
+            codes = stripCodesByCalcType(codes, match.calcType);
             document.getElementById('pSup').innerText = match.supplier;
             document.getElementById('pGift').innerText = match.name;
-            document.getElementById('pStart').innerText = displayStart;
-            document.getElementById('pEnd').innerText = displayEnd;
+            document.getElementById('pStart').innerText = codes[0] || "";
+            document.getElementById('pEnd').innerText = codes[codes.length - 1] || "";
             document.getElementById('pExpiry').innerText = calculateExpiryDate(match.rule1);
             document.getElementById('pCount').innerText = codes.length;
             document.getElementById('previewBox').style.display = 'block';
@@ -735,6 +767,15 @@
         return 'proc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
 
+    // 將監控任務同步寫入 Google Sheet 的 TaskMonitor 工作表（背景執行，不阻擋操作，失敗不影響前端顯示）
+    function logTaskToSheet(task) {
+        try {
+            fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'logTask', task: task }) }).catch(() => {});
+        } catch (e) { /* 忽略同步失敗，不影響主流程 */ }
+    }
+
+    const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
+
     function addProcessingStatus(id, orderNo, count, supplier, gift, startTime) {
         processingStatuses.processing.push({
             id: id,
@@ -746,6 +787,17 @@
             status: 'processing'
         });
         updateStatusDisplay();
+        // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
+        logTaskToSheet({
+            taskId: id,
+            taskType: supplier === '啟用作業' ? '啟用' : '出庫',
+            description: orderNo,
+            detail: supplier + ' - ' + gift,
+            count: count,
+            user: currentUser,
+            startTime: startTime,
+            status: '處理中'
+        });
     }
 
     function updateProcessingStatus(id, newStatus, startTime, errorMsg = '') {
@@ -780,12 +832,22 @@
         }
 
         updateStatusDisplay();
+        // 同步狀態變更到 Google Sheet TaskMonitor
+        logTaskToSheet({
+            taskId: id,
+            status: TASK_STATUS_TEXT[newStatus] || newStatus,
+            finishTime: new Date(),
+            elapsedSec: duration,
+            errorMsg: errorMsg || ''
+        });
     }
 
     function markProblemAsSolved(id) {
         const problem = processingStatuses.problem.find(p => p.id === id);
         if (problem) {
-            updateProcessingStatus(id, 'solved', problem.startTime);
+            // 先把項目放回 processing 清單讓 updateProcessingStatus 能找到它
+            processingStatuses.processing.push(problem);
+            updateProcessingStatus(id, 'solved', problem.startTime, problem.errorMsg || '');
         }
     }
 
@@ -916,9 +978,34 @@
 
     async function activateRange(start, end, idx) {
         if (!confirm(`確定要啟動範圍 ${start} ~ ${end} 嗎？`)) return;
-        showLoading();
-        await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activateRange', start: start, end: end }) });
-        hideLoading(); showToast(); checkActivationStatus(start, end, idx, document.getElementById('filterActStatus').value); loadStats();
+
+        // 送入右側監控面板追蹤，不阻擋畫面，可立即繼續其他操作
+        const processId = generateProcessId();
+        const startTime = new Date();
+        const codes = getRangeCodes(start, end);
+        addProcessingStatus(processId, `啟用 ${start}~${end}`, codes.length || '-', '啟用作業', '範圍啟動', startTime);
+
+        // 標示該列狀態為啟用中
+        const cell = document.getElementById(`act-status-${idx}`);
+        if (cell) cell.innerHTML = `<span class="status-badge status-part">啟用中...</span>`;
+
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activateRange', start: start, end: end }) });
+            const data = await res.json().catch(() => ({}));
+            if (data && data.result && data.result !== "success") throw new Error(data.message || "啟用失敗");
+            updateProcessingStatus(processId, 'completed', startTime);
+            showToast("啟用完成");
+            // 重新查詢該列的啟動狀態（若仍在同一頁）
+            if (document.getElementById(`act-status-${idx}`)) {
+                checkActivationStatus(start, end, idx, document.getElementById('filterActStatus').value);
+            }
+            loadStats();
+        } catch (err) {
+            updateProcessingStatus(processId, 'problem', startTime, err.message || '啟用失敗');
+            if (document.getElementById(`act-status-${idx}`)) {
+                checkActivationStatus(start, end, idx, document.getElementById('filterActStatus').value);
+            }
+        }
     }
 
     function toggleRegMode(m) { document.getElementById('regList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('regRange').style.display = (m === 'range') ? 'block' : 'none'; }
