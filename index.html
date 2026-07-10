@@ -682,7 +682,7 @@
             window.currentUseMatch = match;
             window.currentUseCodes = codes;
             
-            document.getElementById('pUsageStatus').innerText = "檢查中...";
+            document.getElementById('pUsageStatus').innerHTML = `<span style="color:#e6a700; font-weight:bold;">檢查中...</span>`;
             document.getElementById('usageWarning').style.display = 'none';
             
             const res = await fetch(`${API_URL}?action=checkUsage&codes=${JSON.stringify(codes)}`);
@@ -692,7 +692,7 @@
                 document.getElementById('usageWarning').innerHTML = `<strong>警語：代碼 ${data.usedCodes.join(', ')} 已被登記使用過！確認要再登記？</strong>`;
                 document.getElementById('usageWarning').style.display = 'block';
             } else {
-                document.getElementById('pUsageStatus').innerText = "未使用";
+                document.getElementById('pUsageStatus').innerHTML = `<span style="color:#28a745;">未使用</span>`;
                 document.getElementById('usageWarning').style.display = 'none';
             }
         }
