@@ -19,9 +19,9 @@
 
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
     body { background-color: var(--soft-bg); padding: 20px; display: flex; justify-content: center; min-height: 100vh; color: var(--text-color); }
-    .main-wrapper { width: 100%; max-width: 1600px; display: flex; gap: 20px; }
-    .container { flex: 1; background: #fff; padding: 25px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); }
-    .status-panel { width: 320px; background: #fff; padding: 20px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); max-height: 90vh; overflow-y: auto; }
+    .main-wrapper { width: 100%; display: block; padding-right: calc(25vw + 10px); }
+    .container { width: 100%; margin: 0 auto; background: #fff; padding: 25px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); }
+    .status-panel { position: fixed; top: 0; right: 0; width: 25vw; height: 100vh; background: #fff; padding: 20px; border-radius: 16px 0 0 16px; box-shadow: -4px 0 15px rgba(255,183,197,0.4); overflow-y: auto; z-index: 500; border-left: 2px solid var(--primary-pink); }
     .page { display: none; }
     .page.active { display: block; }
     .reg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -41,7 +41,7 @@
     .act-row-btn { background: var(--primary-blue); color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-top: 4px; }
     .del-btn { background: var(--danger-red); color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
     #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: none; justify-content: center; align-items: center; z-index: 9999; color: var(--dark-pink); font-weight: bold; }
-    #toast { position: fixed; top: 20px; right: 20px; background: var(--dark-pink); color: white; padding: 15px; border-radius: 8px; display: none; z-index: 10000; }
+    #toast { position: fixed; top: 20px; right: calc(25vw + 20px); background: var(--dark-pink); color: white; padding: 15px; border-radius: 8px; display: none; z-index: 10000; }
     #previewBox { background: #f0f7ff; padding: 15px; border-radius: 10px; display: none; margin-top: 15px; border: 1px solid #cce5ff; }
     .status-badge { padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
     .status-unact { background: #fff3cd; color: #856404; }
@@ -78,10 +78,7 @@
     .clear-btn:hover { background: #d0d0d0; }
     .status-count { display: inline-block; background: var(--dark-pink); color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; }
 
-    @media (max-width: 1200px) {
-        .main-wrapper { flex-direction: column; }
-        .status-panel { width: 100%; max-height: none; }
-    }
+
     </style>
 </head>
 <body>
@@ -256,13 +253,13 @@
                         <th style="width:10%">項目</th>
                         <th style="width:12%">首碼</th>
                         <th style="width:12%">尾碼</th>
-                        <th style="width:8%">數量</th>
-                        <th style="width:10%">人員</th>
-                        <th style="width:12%">訂單號</th>
-                        <th style="width:10%">狀態</th>
-                        <th style="width:6%">操作</th>
+                        <th style="width:6%">數量</th>
+                        <th style="width:8%">人員</th>
+                        <th style="width:10%">訂單號</th>
+                        <th style="width:12%">啟動狀態</th>
+                        <th style="width:10%">操作</th>
                     </tr></thead>
-                    <tbody id="recordsTableBody"></tbody>
+                    <tbody id="recordsBody"></tbody>
                 </table>
             </div>
         </div>
@@ -408,73 +405,127 @@
         let filtered = recordsCache.map((r, index) => ({ data: r, oriIndex: index }));
         filtered = filtered.filter(item => {
             const r = item.data;
-            if (currentTypeFilter && r[10] !== currentTypeFilter) return false;
-            if (fUser && !r[6].toLowerCase().includes(fUser)) return false;
-            if (fOrder && !r[7].toLowerCase().includes(fOrder)) return false;
-            if (fDate) {
-                const rDate = new Date(r[0]).toISOString().split('T')[0];
-                if (rDate !== fDate) return false;
-            }
-            if (fAct === 'unact' && r[9] !== '未啟動') return false;
-            if (fAct === 'act' && r[9] !== '已啟動') return false;
-            return true;
+            const type = r[10] || "使用";
+            const matchType = !currentTypeFilter || type === currentTypeFilter;
+            const matchUser = r[6].toLowerCase().includes(fUser);
+            const matchOrder = String(r[7]).toLowerCase().includes(fOrder);
+            const matchDate = !fDate || new Date(r[0]).toISOString().split('T')[0] === fDate;
+            return matchType && matchUser && matchOrder && matchDate;
         });
-        if (sortDesc) filtered.reverse();
-        const tbody = document.getElementById('recordsTableBody');
-        tbody.innerHTML = "";
-        filtered.forEach(item => {
+        filtered.sort((a, b) => sortDesc ? new Date(b.data[0]) - new Date(a.data[0]) : new Date(a.data[0]) - new Date(b.data[0]));
+        const body = document.getElementById('recordsBody');
+        body.innerHTML = "";
+        for (const item of filtered) {
             const r = item.data;
+            const idx = item.oriIndex;
+            const isDel = r[9] === "已登記刪除";
+            const type = r[10] || "使用";
+            const typeClass = type === "登記" ? "type-reg" : "type-use";
             const tr = document.createElement('tr');
-            const typeSpan = `<span class="${r[10] === '登記' ? 'type-reg' : 'type-use'}">${r[10]}</span>`;
-            const statusSpan = `<span class="status-badge ${r[9] === '未啟動' ? 'status-unact' : (r[9] === '已啟動' ? 'status-act' : 'status-part')}">${r[9]}</span>`;
-            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td>${typeSpan}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${statusSpan}</td><td><button class="del-btn" onclick="deleteRow(${item.oriIndex})">刪除</button></td>`;
-            tbody.appendChild(tr);
-        });
+            tr.id = `row-${idx}`;
+            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td id="act-status-${idx}">讀取中...</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
+            body.appendChild(tr);
+            if (!isDel) checkActivationStatus(r[3], r[4], idx, fAct);
+            else document.getElementById(`act-status-${idx}`).innerText = "-";
+        }
         hideLoading();
     }
 
-    let useSmartDetectDebounced = debounce(useSmartDetect, 500);
-    let useAutoPreviewDebounced = debounce(useAutoPreview, 500);
-    let useSmartDetectListDebounced = debounce(useSmartDetectList, 500);
-
-    function debounce(func, delay) { let timer; return function(...args) { clearTimeout(timer); timer = setTimeout(() => func(...args), delay); }; }
-
-    async function useSmartDetect() {
-        const start = document.getElementById('useStart').value.trim();
-        if (!start) return;
-        const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(start)}`);
+    async function checkActivationStatus(start, end, idx, filter) {
+        const res = await fetch(`${API_URL}?action=checkActivation&start=${start}&end=${end}`);
         const data = await res.json();
-        if (data.success) {
-            document.getElementById('useSupplierSelect').value = data.supplier;
-            useUpdateGiftSelect();
-            document.getElementById('useGiftSelect').value = data.giftName;
-            useAutoPreview();
+        const container = document.getElementById(`act-status-${idx}`);
+        if (!container) return;
+        const isAllAct = data.unactivatedCodes.length === 0;
+        const isAllUnact = false;
+        if (filter === "unact" && isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
+        if (filter === "act" && !isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
+        if (isAllAct) container.innerHTML = `<span class="status-badge status-act">已全啟動</span>`;
+        else container.innerHTML = `<span class="status-badge status-unact">有未啟動</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+    }
+
+    function useSmartDetectDebounced() {
+        // 本地識別立即執行（毫秒級），不再等待 debounce
+        useSmartDetect();
+    }
+
+    function useSmartDetectListDebounced() {
+        // 即時更新數量計數
+        const codes = document.getElementById('useCodes').value.split('\n').filter(c => c.trim() !== "");
+        document.getElementById('pCountText').innerText = "(目前清單: " + codes.length + " 張)";
+        // 本地識別立即執行
+        useSmartDetectList();
+    }
+
+    function useAutoPreviewDebounced() {
+        clearTimeout(detectTimer);
+        detectTimer = setTimeout(() => useAutoPreview(), 300);
+    }
+
+    function useSmartDetect() {
+        const s = document.getElementById('useStart').value.trim();
+        if (!s) return;
+        localDetectSupplier(s);
+    }
+
+    function useSmartDetectList() {
+        const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
+        if (codes.length > 0) {
+            localDetectSupplier(codes[0]);
+        } else {
+            document.getElementById('previewBox').style.display = 'none';
         }
     }
 
-    async function useSmartDetectList() {
-        const codes = document.getElementById('useCodes').value.trim().split('\n').filter(c => c.trim() !== "");
-        if (codes.length === 0) return;
-        const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(codes[0])}`);
-        const data = await res.json();
-        if (data.success) {
-            document.getElementById('useSupplierSelect').value = data.supplier;
-            useUpdateGiftSelect();
-            document.getElementById('useGiftSelect').value = data.giftName;
-            useAutoPreview();
+    let backendDetectTimer = null;
+    function localDetectSupplier(code) {
+        // V3.5.7 本地即時識別：毫秒級匹配 Config 規則（每次按鍵都立即執行，首碼更改時強制重新識別）
+        clearTimeout(backendDetectTimer);
+        let found = false;
+        for (const config of giftDatabase) {
+            if (config.rule1 && code.startsWith(String(config.rule1))) {
+                // 如果有長度限制 (Rule2 是數字)
+                if (config.rule2 && !isNaN(config.rule2)) {
+                    if (code.length === parseInt(config.rule2)) {
+                        applyLocalMatch(config.supplier, config.name);
+                        found = true; break;
+                    }
+                } else {
+                    applyLocalMatch(config.supplier, config.name);
+                    found = true; break;
+                }
+            }
+        }
+        // 若本地未匹配，稍候 600ms 後非同步請求後端備援（避免每次按鍵都發請求）
+        if (!found) {
+            backendDetectTimer = setTimeout(() => {
+                // 發送前再確認首碼未變，避免舊回應覆蓋新輸入
+                fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
+                    .then(r => r.json()).then(d => {
+                        const nowCode = document.getElementById('useMode').value === 'range'
+                            ? document.getElementById('useStart').value.trim()
+                            : (document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "")[0] || "");
+                        if (d.success && nowCode === code) applyLocalMatch(d.supplier, d.giftName);
+                    })
+                    .catch(() => {});
+            }, 600);
         }
     }
 
-    function useUpdateGiftSelect() {
+    function applyLocalMatch(supplier, giftName) {
+        // 強制重新套用：不管目前選單狀態為何，一律重設供應商與重建項目清單，確保首碼更改時立即切換到新的供應商/項目
+        const sSelect = document.getElementById('useSupplierSelect');
+        sSelect.value = supplier;
+        useUpdateGiftSelect(giftName);
+    }
+
+    function useUpdateGiftSelect(targetGiftName) {
         const s = document.getElementById('useSupplierSelect').value;
-        const g = document.getElementById('useGiftSelect');
-        g.innerHTML = '<option value="">請選擇</option>';
-        giftDatabase.filter(r => r.supplier === s).forEach(r => {
-            const opt = document.createElement('option');
-            opt.value = r.name;
-            opt.text = r.name;
-            g.appendChild(opt);
-        });
+        const filtered = giftDatabase.filter(i => i.supplier === s);
+        const select = document.getElementById('useGiftSelect');
+        select.innerHTML = '<option value="">請選擇</option>' + filtered.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
+        if (targetGiftName) select.value = targetGiftName;
+        useAutoPreview();
     }
 
     async function useAutoPreview() {
@@ -539,6 +590,7 @@
         
         const codes = window.currentUseCodes;
         const match = window.currentUseMatch;
+        const expiry = document.getElementById('pExpiry').innerText;
         const processId = generateProcessId();
         const startTime = new Date();
 
@@ -568,7 +620,7 @@
                         end: codes[codes.length-1],
                         count: codes.length,
                         orderNo: orderNo,
-                        expiry: document.getElementById('pExpiry').innerText
+                        expiry: expiry
                     }
                 }) 
             });
@@ -727,6 +779,11 @@
         document.getElementById('solvedCount').innerText = processingStatuses.solved.length;
     }
 
+    // 每秒自動更新處理中任務的經過時間
+    setInterval(() => {
+        if (processingStatuses.processing.length > 0) updateStatusDisplay();
+    }, 1000);
+
     async function deleteRow(i) {
         if (!confirm("確認刪除？(將會重置使用狀態並同步分表)")) return;
         showLoading();
@@ -773,7 +830,13 @@
 
     function toggleRegMode(m) { document.getElementById('regList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('regRange').style.display = (m === 'range') ? 'block' : 'none'; }
     function toggleActMode(m) { document.getElementById('actList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('actRange').style.display = (m === 'range') ? 'block' : 'none'; }
-    function toggleUseMode(m) { document.getElementById('useRangeSection').style.display = (m === 'range') ? 'block' : 'none'; document.getElementById('useListSection').style.display = (m === 'list') ? 'block' : 'none'; }
+    function toggleUseMode(m) {
+        document.getElementById('useRangeSection').style.display = (m === 'range') ? 'block' : 'none';
+        document.getElementById('useListSection').style.display = (m === 'list') ? 'block' : 'none';
+        document.getElementById('pRangeDisplay').style.display = (m === 'range') ? 'block' : 'none';
+        document.getElementById('pListDisplay').style.display = (m === 'list') ? 'block' : 'none';
+        useAutoPreview();
+    }
     function updateGiftMenu() { var s = document.getElementById('supplierSelect').value; var g = document.getElementById('giftSelect'); g.innerHTML = '<option value="">請選擇</option>'; giftDatabase.filter(r => r.supplier === s).forEach(r => { var opt = document.createElement('option'); opt.value = r.name; opt.text = r.name; g.appendChild(opt); }); }
     function calculateExpiryDate(rule) { if (!rule || rule === 'N/A') return 'N/A'; if (rule.includes('m_end')) { const months = parseInt(rule); const date = new Date(); date.setMonth(date.getMonth() + months + 1); date.setDate(0); return date.toISOString().split('T')[0]; } return rule; }
     function getRangeCodes(start, end) { var sStr = start.toString().trim(); var eStr = end.toString().trim(); if(!sStr || !eStr) return []; var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/); var prefix = sMatch[1] || ""; var sNumStr = sMatch[2] || "0"; var eNumStr = eMatch[2] || "0"; var sVal = parseInt(sNumStr, 10); var eVal = parseInt(eNumStr, 10); var padLen = sNumStr.length; var codes = []; for (var i = sVal; i <= eVal; i++) { codes.push(prefix + i.toString().padStart(padLen, '0')); } return codes; }
