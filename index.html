@@ -474,7 +474,7 @@
         try {
             const res = await fetch(API_URL, { 
                 method: "POST", 
-                body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: applySuffixLogic(c, match.calcType), OrderNo: orderNo})) }) 
+                body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: c, OrderNo: orderNo})) }) 
             });
             const data = await res.json();
             if (data.result === "success") {
@@ -497,6 +497,8 @@
                 document.getElementById('useEnd').value = ""; 
                 document.getElementById('useCodes').value = "";
                 document.getElementById('useOrderNo').value = ""; 
+                document.getElementById('useSupplierSelect').value = "";
+                document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
                 document.getElementById('previewBox').style.display = 'none';
                 loadStats();
             } else { throw new Error(data.message); }
