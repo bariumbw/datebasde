@@ -446,23 +446,26 @@
 
     function useAutoPreview() {
         const mode = document.getElementById('useMode').value;
-        const g = document.getElementById('useGiftSelect').value;
+        const s_select = document.getElementById('useSupplierSelect').value;
+        const g_select = document.getElementById('useGiftSelect').value;
         
         if (mode === 'range') {
             const s = document.getElementById('useStart').value.trim();
             const e = document.getElementById('useEnd').value.trim();
-            if (s && e && g) usePreviewData(getRangeCodes(s, e), s, e);
+            if (s && e && s_select && g_select) usePreviewData(getRangeCodes(s, e), s, e);
             else document.getElementById('previewBox').style.display = 'none';
         } else {
             const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
-            if (codes.length > 0 && g) usePreviewData(codes, codes[0], codes[codes.length-1]);
+            if (codes.length > 0 && s_select && g_select) usePreviewData(codes, codes[0], codes[codes.length-1]);
             else document.getElementById('previewBox').style.display = 'none';
         }
     }
 
     async function usePreviewData(codes, displayStart, displayEnd) {
-        const g = document.getElementById('useGiftSelect').value;
-        const match = giftDatabase.find(i => i.name === g);
+        const s_select = document.getElementById('useSupplierSelect').value;
+        const g_select = document.getElementById('useGiftSelect').value;
+        // 關鍵修復：同時比對供應商與項目名稱，避免同名項目抓錯資料
+        const match = giftDatabase.find(i => i.supplier === s_select && i.name === g_select);
         if (match && codes.length > 0) {
             document.getElementById('pSup').innerText = match.supplier;
             document.getElementById('pGift').innerText = match.name;
