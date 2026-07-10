@@ -482,11 +482,14 @@
             
             const res = await fetch(`${API_URL}?action=checkUsage&codes=${JSON.stringify(codes)}`);
             const data = await res.json();
-            if (data.usedCodes.length > 0) {
-                document.getElementById('pUsageStatus').innerText = `部分已使用 (${data.usedCodes.length} 張)`;
-                document.getElementById('usageWarning').innerText = `警語：代碼 ${data.usedCodes[0]} 等已被登記使用過！確認要再登記？`;
+            if (data.usedCodes && data.usedCodes.length > 0) {
+                document.getElementById('pUsageStatus').innerHTML = `<span style="color:red">偵測到重複代碼 (${data.usedCodes.length} 張)</span>`;
+                document.getElementById('usageWarning').innerHTML = `<strong>警語：代碼 ${data.usedCodes.join(', ')} 已被登記使用過！確認要再登記？</strong>`;
                 document.getElementById('usageWarning').style.display = 'block';
-            } else document.getElementById('pUsageStatus').innerText = "未使用";
+            } else {
+                document.getElementById('pUsageStatus').innerText = "未使用";
+                document.getElementById('usageWarning').style.display = 'none';
+            }
         }
     }
 
