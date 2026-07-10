@@ -198,12 +198,14 @@
                             </select>
                         </div>
                         <div id="useRangeSection">
-                            <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetectDebounced()" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
-                            <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebounced()"></div>
+                            <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetectDebounced(); useUpdateRangeCount();" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
+                            <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebounced(); useUpdateRangeCount();"></div>
                         </div>
                         <div id="useListSection" style="display:none;">
                             <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebounced(); calcTotal('useCodes', 'pCountText')"></textarea></div>
                         </div>
+                        <div id="detectStatus" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
+                        <div id="useQuickCount" style="font-size:14px; font-weight:bold; margin-top:5px; color:var(--primary-blue);"></div>
                     </div>
                     <div>
                         <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
@@ -235,10 +237,10 @@
                     <button id="tab-reg" class="tab-btn" onclick="filterRecordsByType('登記')">登記</button>
                 </div>
                 <div class="filter-bar">
-                    <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderRecords()">
-                    <input type="text" id="filterOrder" placeholder="篩選訂單號" oninput="renderRecords()">
-                    <input type="date" id="filterDate" onchange="renderRecords()">
-                    <select id="filterActStatus" onchange="renderRecords()">
+                    <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderRecords(true)">
+                    <input type="text" id="filterOrder" placeholder="篩選訂單號" oninput="renderRecords(true)">
+                    <input type="date" id="filterDate" onchange="renderRecords(true)">
+                    <select id="filterActStatus" onchange="renderRecords(true)">
                         <option value="">全部狀態</option>
                         <option value="unact">未啟動</option>
                         <option value="act">已啟動</option>
@@ -261,6 +263,7 @@
                     </tr></thead>
                     <tbody id="recordsBody"></tbody>
                 </table>
+                <div id="recordsPager" style="display:flex; justify-content:center; align-items:center; gap:6px; margin-top:15px; flex-wrap:wrap;"></div>
             </div>
         </div>
     </div>
@@ -394,10 +397,20 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         const tabId = type === '使用' ? 'tab-use' : (type === '登記' ? 'tab-reg' : 'tab-all');
         document.getElementById(tabId).classList.add('active');
+        renderRecords(true);
+    }
+
+    // 分頁狀態
+    const RECORDS_PER_PAGE = 20;
+    let recordsCurrentPage = 1;
+
+    function goToRecordsPage(page) {
+        recordsCurrentPage = page;
         renderRecords();
     }
 
-    function renderRecords() {
+    function renderRecords(resetPage = false) {
+        if (resetPage) recordsCurrentPage = 1;
         const fUser = document.getElementById('filterUser').value.toLowerCase();
         const fOrder = document.getElementById('filterOrder').value.toLowerCase();
         const fDate = document.getElementById('filterDate').value;
@@ -413,9 +426,16 @@
             return matchType && matchUser && matchOrder && matchDate;
         });
         filtered.sort((a, b) => sortDesc ? new Date(b.data[0]) - new Date(a.data[0]) : new Date(a.data[0]) - new Date(b.data[0]));
+
+        // 分頁：每頁 20 單
+        const totalPages = Math.max(1, Math.ceil(filtered.length / RECORDS_PER_PAGE));
+        if (recordsCurrentPage > totalPages) recordsCurrentPage = totalPages;
+        const pageStart = (recordsCurrentPage - 1) * RECORDS_PER_PAGE;
+        const pageItems = filtered.slice(pageStart, pageStart + RECORDS_PER_PAGE);
+
         const body = document.getElementById('recordsBody');
         body.innerHTML = "";
-        for (const item of filtered) {
+        for (const item of pageItems) {
             const r = item.data;
             const idx = item.oriIndex;
             const isDel = r[9] === "已登記刪除";
@@ -428,7 +448,33 @@
             if (!isDel) checkActivationStatus(r[3], r[4], idx, fAct);
             else document.getElementById(`act-status-${idx}`).innerText = "-";
         }
+        renderRecordsPager(totalPages, filtered.length);
         hideLoading();
+    }
+
+    function renderRecordsPager(totalPages, totalCount) {
+        const pager = document.getElementById('recordsPager');
+        if (!pager) return;
+        if (totalPages <= 1) { pager.innerHTML = totalCount > 0 ? `<span style="font-size:12px; color:#666;">共 ${totalCount} 單</span>` : ''; return; }
+        let html = `<span style="font-size:12px; color:#666; margin-right:8px;">共 ${totalCount} 單</span>`;
+        const btnStyle = 'padding:6px 12px; font-size:13px; border-radius:6px; border:1px solid var(--primary-pink); background:#fff; color:var(--text-color); cursor:pointer;';
+        const activeStyle = 'padding:6px 12px; font-size:13px; border-radius:6px; border:1px solid var(--dark-pink); background:var(--dark-pink); color:#fff; font-weight:bold;';
+        // 上一頁
+        if (recordsCurrentPage > 1) html += `<button style="${btnStyle}" onclick="goToRecordsPage(${recordsCurrentPage - 1})">上一頁</button>`;
+        // 頁碼：顯示首頁、尾頁及當前頁附近 2 頁，其餘用 ...
+        let lastShown = 0;
+        for (let p = 1; p <= totalPages; p++) {
+            if (p === 1 || p === totalPages || Math.abs(p - recordsCurrentPage) <= 2) {
+                if (lastShown && p - lastShown > 1) html += `<span style="color:#999;">...</span>`;
+                html += p === recordsCurrentPage
+                    ? `<button style="${activeStyle}">${p}</button>`
+                    : `<button style="${btnStyle}" onclick="goToRecordsPage(${p})">${p}</button>`;
+                lastShown = p;
+            }
+        }
+        // 下一頁
+        if (recordsCurrentPage < totalPages) html += `<button style="${btnStyle}" onclick="goToRecordsPage(${recordsCurrentPage + 1})">下一頁</button>`;
+        pager.innerHTML = html;
     }
 
     async function checkActivationStatus(start, end, idx, filter) {
@@ -445,7 +491,7 @@
     }
 
     function useSmartDetectDebounced() {
-        // 本地識別立即執行（毫秒級），不再等待 debounce
+        // 識別立即執行
         useSmartDetect();
     }
 
@@ -453,8 +499,28 @@
         // 即時更新數量計數
         const codes = document.getElementById('useCodes').value.split('\n').filter(c => c.trim() !== "");
         document.getElementById('pCountText').innerText = "(目前清單: " + codes.length + " 張)";
-        // 本地識別立即執行
+        document.getElementById('useQuickCount').innerText = codes.length > 0 ? `數量: ${codes.length} 張` : "";
+        // 識別立即執行
         useSmartDetectList();
+    }
+
+    // 未識別前先顯示範圍數量
+    function useUpdateRangeCount() {
+        const s = document.getElementById('useStart').value.trim();
+        const e = document.getElementById('useEnd').value.trim();
+        const el = document.getElementById('useQuickCount');
+        if (!s || !e) { el.innerText = s || e ? "數量: 請輸入完整首尾碼" : ""; return; }
+        const codes = getRangeCodes(s, e);
+        el.innerText = codes.length > 0 ? `數量: ${codes.length} 張` : "數量: 0 (範圍無效)";
+    }
+
+    function setDetectStatus(state, text) {
+        const el = document.getElementById('detectStatus');
+        if (!el) return;
+        if (state === 'detecting') { el.style.color = '#ff9500'; el.innerText = text || '⏳ 識別中...'; }
+        else if (state === 'found') { el.style.color = '#28a745'; el.innerText = text || '✓ 已識別'; }
+        else if (state === 'notfound') { el.style.color = '#ff3b30'; el.innerText = text || '✗ 沒找到對應的供應商/項目（請確認代碼已入庫，或手動選擇）'; }
+        else { el.innerText = ''; }
     }
 
     function useAutoPreviewDebounced() {
@@ -464,7 +530,7 @@
 
     function useSmartDetect() {
         const s = document.getElementById('useStart').value.trim();
-        if (!s) return;
+        if (!s) { setDetectStatus('clear'); return; }
         localDetectSupplier(s);
     }
 
@@ -473,43 +539,67 @@
         if (codes.length > 0) {
             localDetectSupplier(codes[0]);
         } else {
+            setDetectStatus('clear');
             document.getElementById('previewBox').style.display = 'none';
         }
     }
 
     let backendDetectTimer = null;
+    const detectCache = {}; // 識別結果快取：同一代碼不重複查詢後端
+
+    function getCurrentInputCode() {
+        return document.getElementById('useMode').value === 'range'
+            ? document.getElementById('useStart').value.trim()
+            : (document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "")[0] || "");
+    }
+
+    let lastDetectedCode = null; // 上次成功識別的代碼
+
     function localDetectSupplier(code) {
-        // V3.5.7 本地即時識別：毫秒級匹配 Config 規則（每次按鍵都立即執行，首碼更改時強制重新識別）
+        // V3.6.0 識別以 GiftStatus 實際入庫資料為準（透過後端 detectInfoByCode 查詢 GiftStatus 總表）
         clearTimeout(backendDetectTimer);
-        let found = false;
-        for (const config of giftDatabase) {
-            if (config.rule1 && code.startsWith(String(config.rule1))) {
-                // 如果有長度限制 (Rule2 是數字)
-                if (config.rule2 && !isNaN(config.rule2)) {
-                    if (code.length === parseInt(config.rule2)) {
-                        applyLocalMatch(config.supplier, config.name);
-                        found = true; break;
-                    }
-                } else {
-                    applyLocalMatch(config.supplier, config.name);
-                    found = true; break;
-                }
+
+        // 首碼更改了：先清空舊的供應商/項目選擇，強制重新識別
+        if (lastDetectedCode !== null && code !== lastDetectedCode) {
+            lastDetectedCode = null;
+            document.getElementById('useSupplierSelect').value = "";
+            document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
+            document.getElementById('previewBox').style.display = 'none';
+        }
+
+        // 1) 快取命中：立即套用（毫秒級）
+        if (detectCache[code] !== undefined) {
+            const d = detectCache[code];
+            if (d && d.success) {
+                lastDetectedCode = code;
+                setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}`);
+                applyLocalMatch(d.supplier, d.giftName);
+            } else {
+                setDetectStatus('notfound');
             }
+            return;
         }
-        // 若本地未匹配，稍候 600ms 後非同步請求後端備援（避免每次按鍵都發請求）
-        if (!found) {
-            backendDetectTimer = setTimeout(() => {
-                // 發送前再確認首碼未變，避免舊回應覆蓋新輸入
-                fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
-                    .then(r => r.json()).then(d => {
-                        const nowCode = document.getElementById('useMode').value === 'range'
-                            ? document.getElementById('useStart').value.trim()
-                            : (document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "")[0] || "");
-                        if (d.success && nowCode === code) applyLocalMatch(d.supplier, d.giftName);
-                    })
-                    .catch(() => {});
-            }, 600);
-        }
+
+        // 2) 未命中：顯示識別中，稍候 400ms（等輸入/掃碼完成）後查詢 GiftStatus
+        setDetectStatus('detecting');
+        backendDetectTimer = setTimeout(() => {
+            fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
+                .then(r => r.json()).then(d => {
+                    detectCache[code] = d; // 快取結果（含未找到，避免重複查詢）
+                    // 確認首碼未變才套用，避免舊回應覆蓋新輸入
+                    if (getCurrentInputCode() !== code) return;
+                    if (d && d.success) {
+                        lastDetectedCode = code;
+                        setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}`);
+                        applyLocalMatch(d.supplier, d.giftName);
+                    } else {
+                        setDetectStatus('notfound');
+                    }
+                })
+                .catch(() => {
+                    if (getCurrentInputCode() === code) setDetectStatus('notfound', '✗ 識別查詢失敗（網絡問題），請手動選擇或重試');
+                });
+        }, 400);
     }
 
     function applyLocalMatch(supplier, giftName) {
@@ -605,6 +695,9 @@
         document.getElementById('useSupplierSelect').value = "";
         document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
         document.getElementById('previewBox').style.display = 'none';
+        setDetectStatus('clear');
+        document.getElementById('useQuickCount').innerText = "";
+        lastDetectedCode = null;
 
         try {
             const res = await fetch(API_URL, { 
