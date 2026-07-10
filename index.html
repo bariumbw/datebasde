@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>禮券全能管理系統 V3.5.0 - 偵測修復版</title>
+    <title>禮券全能管理系統 V3.5.5 - 出庫處理狀態監控版</title>
     <style>
     :root {
         --primary-pink: #ffb7c5;
@@ -19,7 +19,9 @@
 
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
     body { background-color: var(--soft-bg); padding: 20px; display: flex; justify-content: center; min-height: 100vh; color: var(--text-color); }
-    .container { width: 100%; max-width: 1350px; background: #fff; padding: 25px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); }
+    .main-wrapper { width: 100%; max-width: 1600px; display: flex; gap: 20px; }
+    .container { flex: 1; background: #fff; padding: 25px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); }
+    .status-panel { width: 320px; background: #fff; padding: 20px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); max-height: 90vh; overflow-y: auto; }
     .page { display: none; }
     .page.active { display: block; }
     .reg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -57,6 +59,29 @@
     .stats-table th { background: #f0f0f0; }
     .usage-warning { color: var(--danger-red); font-weight: bold; margin-top: 10px; display: none; }
     .code-list-mini { font-size: 10px; color: #666; margin-top: 4px; max-height: 40px; overflow-y: auto; line-height: 1.2; }
+
+    /* 狀態面板樣式 */
+    .status-panel h3 { margin-top: 0; margin-bottom: 15px; font-size: 16px; color: var(--text-color); border-bottom: 2px solid var(--primary-pink); padding-bottom: 10px; }
+    .status-section { margin-bottom: 20px; }
+    .status-section-title { font-weight: bold; font-size: 12px; color: #666; margin-bottom: 8px; text-transform: uppercase; }
+    .status-item { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid var(--primary-pink); font-size: 12px; }
+    .status-item.processing { border-left-color: var(--warning-orange); background: #fffbf0; }
+    .status-item.completed { border-left-color: var(--success-green); background: #f0fdf4; }
+    .status-item.problem { border-left-color: var(--danger-red); background: #fef2f2; }
+    .status-item.solved { border-left-color: #9333ea; background: #faf5ff; }
+    .status-item-header { font-weight: bold; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+    .status-item-time { font-size: 10px; color: #999; }
+    .status-item-content { color: #555; line-height: 1.4; }
+    .status-item-problems { color: var(--danger-red); margin-top: 4px; }
+    .status-item-problems li { margin-left: 15px; }
+    .clear-btn { background: #e0e0e0; color: #666; padding: 4px 8px; font-size: 10px; border: none; border-radius: 4px; cursor: pointer; margin-top: 4px; }
+    .clear-btn:hover { background: #d0d0d0; }
+    .status-count { display: inline-block; background: var(--dark-pink); color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; }
+
+    @media (max-width: 1200px) {
+        .main-wrapper { flex-direction: column; }
+        .status-panel { width: 100%; max-height: none; }
+    }
     </style>
 </head>
 <body>
@@ -64,180 +89,207 @@
 <div id="loadingOverlay">處理中...</div>
 <div id="toast">存檔成功！</div>
 
-<div class="container">
-    <div id="loginPage" class="page active">
-        <h2>禮券全能管理系統 V3.5.0</h2>
-        <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
-        <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
-        <button onclick="handleLogin()" style="width:100%;">登入系統</button>
-    </div>
+<div class="main-wrapper">
+    <div class="container">
+        <div id="loginPage" class="page active">
+            <h2>禮券全能管理系統 V3.5.5</h2>
+            <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
+            <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
+            <button onclick="handleLogin()" style="width:100%;">登入系統</button>
+        </div>
 
-    <div id="appPage" class="page">
-        <h2>禮券管理系統 <span id="userDisplay" style="font-size:14px; color:#86868b;"></span></h2>
-        
-        <nav style="margin-bottom:20px; display:flex; gap:10px; flex-wrap: wrap;">
-            <button id="nav-statsPage" class="nav-btn active" onclick="switchPage('statsPage')">庫存與使用量統計</button>
-            <button id="nav-regPage" class="nav-btn" onclick="switchPage('regPage')">登記新券 (入庫)</button>
-            <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
-            <button id="nav-usePage" class="nav-btn" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
-            <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
-        </nav>
+        <div id="appPage" class="page">
+            <h2>禮券管理系統 <span id="userDisplay" style="font-size:14px; color:#86868b;"></span></h2>
+            
+            <nav style="margin-bottom:20px; display:flex; gap:10px; flex-wrap: wrap;">
+                <button id="nav-statsPage" class="nav-btn active" onclick="switchPage('statsPage')">庫存與使用量統計</button>
+                <button id="nav-regPage" class="nav-btn" onclick="switchPage('regPage')">登記新券 (入庫)</button>
+                <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
+                <button id="nav-usePage" class="nav-btn" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
+                <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
+            </nav>
 
-        <!-- 統計儀表板 -->
-        <div id="statsPage" class="page active">
-            <h2>庫存與使用量統計</h2>
-            <div class="filter-bar">
-                <div class="form-group"><label>日期(起)</label><input type="date" id="statStart" onchange="loadStats()"></div>
-                <div class="form-group"><label>日期(終)</label><input type="date" id="statEnd" onchange="loadStats()"></div>
-                <div class="form-group"><label>供應商</label><select id="statSupplier" onchange="updateStatGiftMenu(); loadStats()"><option value="">全部</option></select></div>
-                <div class="form-group"><label>項目</label><select id="statGift" onchange="loadStats()"><option value="">全部</option></select></div>
-                <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="loadStats()" style="width:100%;">重新整理</button></div>
+            <!-- 統計儀表板 -->
+            <div id="statsPage" class="page active">
+                <h2>庫存與使用量統計</h2>
+                <div class="filter-bar">
+                    <div class="form-group"><label>日期(起)</label><input type="date" id="statStart" onchange="loadStats()"></div>
+                    <div class="form-group"><label>日期(終)</label><input type="date" id="statEnd" onchange="loadStats()"></div>
+                    <div class="form-group"><label>供應商</label><select id="statSupplier" onchange="updateStatGiftMenu(); loadStats()"><option value="">全部</option></select></div>
+                    <div class="form-group"><label>項目</label><select id="statGift" onchange="loadStats()"><option value="">全部</option></select></div>
+                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="loadStats()" style="width:100%;">重新整理</button></div>
+                </div>
+                <div class="stats-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>項目名稱</th>
+                                <th>供應商</th>
+                                <th>總入庫</th>
+                                <th>總使用</th>
+                                <th>剩餘庫存</th>
+                                <th>已啟動</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statsTableBody"></tbody>
+                    </table>
+                </div>
             </div>
-            <div class="stats-table">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>項目名稱</th>
-                            <th>供應商</th>
-                            <th>總入庫</th>
-                            <th>總使用</th>
-                            <th>剩餘庫存</th>
-                            <th>已啟動</th>
-                        </tr>
-                    </thead>
-                    <tbody id="statsTableBody"></tbody>
+
+            <!-- 登記新券 -->
+            <div id="regPage" class="page">
+                <h2>登記入庫 (Batch: <span id="batchDisplay">...</span>)</h2>
+                <div class="reg-grid">
+                    <div>
+                        <div class="form-group">
+                            <label>輸入模式</label>
+                            <select id="regMode" onchange="toggleRegMode(this.value)">
+                                <option value="list">清單輸入</option>
+                                <option value="range" selected>範圍輸入</option>
+                            </select>
+                        </div>
+                        <div id="regList" style="display:none;" class="form-group">
+                            <label>Code 清單 (每行一個代碼)</label>
+                            <textarea id="regCodes" oninput="calcTotal('regCodes', 'regTotal')"></textarea>
+                        </div>
+                        <div id="regRange">
+                            <div class="form-group"><label>首碼 (起始)</label><input type="text" id="regStart" oninput="calcTotalRange('reg')"></div>
+                            <div class="form-group"><label>尾碼 (結束)</label><input type="text" id="regEnd" oninput="calcTotalRange('reg')"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group"><label>供應商</label><select id="supplierSelect" onchange="updateGiftMenu()"><option value="">請選擇</option></select></div>
+                        <div class="form-group"><label>禮券項目</label><select id="giftSelect"><option value="">請選擇</option></select></div>
+                    </div>
+                </div>
+                <h3 id="regTotal">總張數: 0</h3>
+                <button id="regBtn" onclick="register()" style="width:100%; padding: 12px;">確認登記入庫</button>
+            </div>
+
+            <!-- 禮券啟用 -->
+            <div id="actPage" class="page">
+                <h2>禮券啟用管理</h2>
+                <div class="form-group">
+                    <label>輸入模式</label>
+                    <select id="actMode" onchange="toggleActMode(this.value)">
+                        <option value="list">清單輸入</option>
+                        <option value="range" selected>範圍輸入</option>
+                    </select>
+                </div>
+                <div id="actList" style="display:none;" class="form-group">
+                    <label>Code 清單</label>
+                    <textarea id="actCodes" oninput="calcTotal('actCodes', 'actTotal')"></textarea>
+                </div>
+                <div id="actRange">
+                    <div class="form-group"><label>起始</label><input type="text" id="actStart" oninput="calcTotalRange('act')"></div>
+                    <div class="form-group"><label>結束</label><input type="text" id="actEnd" oninput="calcTotalRange('act')"></div>
+                </div>
+                <h3 id="actTotal">總張數: 0</h3>
+                <button id="actBtn" onclick="activateGift()" style="width:100%; padding: 12px; background: var(--primary-blue);">確認啟用</button>
+            </div>
+
+            <!-- 禮券使用 -->
+            <div id="usePage" class="page">
+                <h2>禮券使用 (出庫)</h2>
+                <div class="reg-grid">
+                    <div>
+                        <div class="form-group">
+                            <label>輸入模式</label>
+                            <select id="useMode" onchange="toggleUseMode(this.value)">
+                                <option value="range" selected>範圍輸入</option>
+                                <option value="list">清單輸入</option>
+                            </select>
+                        </div>
+                        <div id="useRangeSection">
+                            <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetectDebounced()" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
+                            <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebounced()"></div>
+                        </div>
+                        <div id="useListSection" style="display:none;">
+                            <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebounced(); calcTotal('useCodes', 'pCountText')"></textarea></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
+                        <div class="form-group"><label>禮券項目</label><select id="useGiftSelect" onchange="useAutoPreview()"><option value="">請選擇</option></select></div>
+                        <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="useAutoPreview()" style="width:100%; background:var(--primary-blue);">手動重整預覽</button></div>
+                    </div>
+                </div>
+                
+                <div id="previewBox">
+                    <p><strong>預覽資訊</strong></p>
+                    <p>供應商: <span id="pSup"></span> | 項目: <span id="pGift"></span></p>
+                    <p id="pRangeDisplay">範圍: <span id="pStart"></span> ~ <span id="pEnd"></span></p>
+                    <p id="pListDisplay" style="display:none;">模式: 清單出庫</p>
+                    <p>有效日期: <span id="pExpiry"></span></p>
+                    <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
+                    <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong> <span id="pCountText" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
+                    <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
+                    <div class="form-group" style="margin-top:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
+                    <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
+                </div>
+            </div>
+
+            <!-- 流水帳記錄管理 -->
+            <div id="recordsPage" class="page">
+                <h2>流水帳記錄管理</h2>
+                <div class="tab-container">
+                    <button id="tab-all" class="tab-btn active" onclick="filterRecordsByType('')">全部</button>
+                    <button id="tab-use" class="tab-btn" onclick="filterRecordsByType('使用')">使用</button>
+                    <button id="tab-reg" class="tab-btn" onclick="filterRecordsByType('登記')">登記</button>
+                </div>
+                <div class="filter-bar">
+                    <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderRecords()">
+                    <input type="text" id="filterOrder" placeholder="篩選訂單號" oninput="renderRecords()">
+                    <input type="date" id="filterDate" onchange="renderRecords()">
+                    <select id="filterActStatus" onchange="renderRecords()">
+                        <option value="">全部狀態</option>
+                        <option value="unact">未啟動</option>
+                        <option value="act">已啟動</option>
+                    </select>
+                    <button onclick="loadRecords()" style="font-size:12px;">刷新</button>
+                </div>
+                <table id="recordsTable">
+                    <thead><tr>
+                        <th style="width:12%">時間</th>
+                        <th style="width:8%">類型</th>
+                        <th style="width:10%">供應商</th>
+                        <th style="width:10%">項目</th>
+                        <th style="width:12%">首碼</th>
+                        <th style="width:12%">尾碼</th>
+                        <th style="width:8%">數量</th>
+                        <th style="width:10%">人員</th>
+                        <th style="width:12%">訂單號</th>
+                        <th style="width:10%">狀態</th>
+                        <th style="width:6%">操作</th>
+                    </tr></thead>
+                    <tbody id="recordsTableBody"></tbody>
                 </table>
             </div>
         </div>
+    </div>
 
-        <!-- 登記新券 -->
-        <div id="regPage" class="page">
-            <h2>登記入庫 (Batch: <span id="batchDisplay">...</span>)</h2>
-            <div class="reg-grid">
-                <div>
-                    <div class="form-group">
-                        <label>輸入模式</label>
-                        <select id="regMode" onchange="toggleRegMode(this.value)">
-                            <option value="list">清單輸入</option>
-                            <option value="range" selected>範圍輸入</option>
-                        </select>
-                    </div>
-                    <div id="regList" style="display:none;" class="form-group">
-                        <label>Code 清單 (每行一個代碼)</label>
-                        <textarea id="regCodes" oninput="calcTotal('regCodes', 'regTotal')"></textarea>
-                    </div>
-                    <div id="regRange">
-                        <div class="form-group"><label>首碼 (起始)</label><input type="text" id="regStart" oninput="calcTotalRange('reg')"></div>
-                        <div class="form-group"><label>尾碼 (結束)</label><input type="text" id="regEnd" oninput="calcTotalRange('reg')"></div>
-                    </div>
-                </div>
-                <div>
-                    <div class="form-group"><label>供應商</label><select id="supplierSelect" onchange="updateGiftMenu()"><option value="">請選擇</option></select></div>
-                    <div class="form-group"><label>禮券項目</label><select id="giftSelect"><option value="">請選擇</option></select></div>
-                </div>
-            </div>
-            <h3 id="regTotal">總張數: 0</h3>
-            <button id="regBtn" onclick="register()" style="width:100%; padding: 12px;">確認登記入庫</button>
+    <!-- 右側狀態面板 -->
+    <div class="status-panel" id="statusPanel">
+        <h3>出庫處理監控</h3>
+        
+        <div class="status-section">
+            <div class="status-section-title">處理中 <span class="status-count" id="processingCount">0</span></div>
+            <div id="processingList"></div>
         </div>
 
-        <!-- 禮券啟用 -->
-        <div id="actPage" class="page">
-            <h2>禮券啟用管理</h2>
-            <div class="form-group">
-                <label>輸入模式</label>
-                <select id="actMode" onchange="toggleActMode(this.value)">
-                    <option value="list">清單輸入</option>
-                    <option value="range" selected>範圍輸入</option>
-                </select>
-            </div>
-            <div id="actList" style="display:none;" class="form-group">
-                <label>Code 清單</label>
-                <textarea id="actCodes" oninput="calcTotal('actCodes', 'actTotal')"></textarea>
-            </div>
-            <div id="actRange">
-                <div class="form-group"><label>起始</label><input type="text" id="actStart" oninput="calcTotalRange('act')"></div>
-                <div class="form-group"><label>結束</label><input type="text" id="actEnd" oninput="calcTotalRange('act')"></div>
-            </div>
-            <h3 id="actTotal">總張數: 0</h3>
-            <button id="actBtn" onclick="activateGift()" style="width:100%; padding: 12px; background: var(--primary-blue);">確認啟用</button>
+        <div class="status-section">
+            <div class="status-section-title">已完成 (最近3個) <span class="status-count" id="completedCount">0</span></div>
+            <div id="completedList"></div>
         </div>
 
-        <!-- 禮券使用 -->
-        <div id="usePage" class="page">
-            <h2>禮券使用 (出庫)</h2>
-            <div class="reg-grid">
-                <div>
-                    <div class="form-group">
-                        <label>輸入模式</label>
-                        <select id="useMode" onchange="toggleUseMode(this.value)">
-                            <option value="range" selected>範圍輸入</option>
-                            <option value="list">清單輸入</option>
-                        </select>
-                    </div>
-                    <div id="useRangeSection">
-                        <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetectDebounced()" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
-                        <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebounced()"></div>
-                    </div>
-                    <div id="useListSection" style="display:none;">
-                        <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebounced(); calcTotal('useCodes', 'pCountText')"></textarea></div>
-                    </div>
-                </div>
-                <div>
-                    <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
-                    <div class="form-group"><label>禮券項目</label><select id="useGiftSelect" onchange="useAutoPreview()"><option value="">請選擇</option></select></div>
-                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="useAutoPreview()" style="width:100%; background:var(--primary-blue);">手動重整預覽</button></div>
-                </div>
-            </div>
-            
-            <div id="previewBox">
-                <p><strong>預覽資訊</strong></p>
-                <p>供應商: <span id="pSup"></span> | 項目: <span id="pGift"></span></p>
-                <p id="pRangeDisplay">範圍: <span id="pStart"></span> ~ <span id="pEnd"></span></p>
-                <p id="pListDisplay" style="display:none;">模式: 清單出庫</p>
-                <p>有效日期: <span id="pExpiry"></span></p>
-                <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
-                <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong> <span id="pCountText" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
-                <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
-                <div class="form-group" style="margin-top:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
-                <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
-            </div>
+        <div class="status-section">
+            <div class="status-section-title">有問題 <span class="status-count" id="problemCount">0</span></div>
+            <div id="problemList"></div>
         </div>
 
-        <!-- 流水帳記錄管理 -->
-        <div id="recordsPage" class="page">
-            <h2>流水帳記錄管理</h2>
-            <div class="tab-container">
-                <button id="tab-all" class="tab-btn active" onclick="filterRecordsByType('')">全部</button>
-                <button id="tab-use" class="tab-btn" onclick="filterRecordsByType('使用')">使用</button>
-                <button id="tab-reg" class="tab-btn" onclick="filterRecordsByType('登記')">登記</button>
-            </div>
-            <div class="filter-bar">
-                <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderRecords()">
-                <input type="text" id="filterOrder" placeholder="篩選訂單號" oninput="renderRecords()">
-                <input type="date" id="filterDate" onchange="renderRecords()">
-                <select id="filterActStatus" onchange="renderRecords()">
-                    <option value="">全部狀態</option>
-                    <option value="unact">未啟動</option>
-                    <option value="act">已啟動</option>
-                </select>
-                <button onclick="loadRecords()" style="font-size:12px;">刷新</button>
-            </div>
-            <table id="recordsTable">
-                <thead><tr>
-                    <th style="width:12%">時間</th>
-                    <th style="width:8%">類型</th>
-                    <th style="width:10%">供應商</th>
-                    <th style="width:10%">項目</th>
-                    <th style="width:12%">首碼</th>
-                    <th style="width:12%">尾碼</th>
-                    <th style="width:6%">數量</th>
-                    <th style="width:8%">人員</th>
-                    <th style="width:10%">訂單號</th>
-                    <th style="width:12%">啟動狀態</th>
-                    <th style="width:10%">操作</th>
-                </tr></thead>
-                <tbody id="recordsBody"></tbody>
-            </table>
+        <div class="status-section">
+            <div class="status-section-title">問題已解決 (最近1個) <span class="status-count" id="solvedCount">0</span></div>
+            <div id="solvedList"></div>
         </div>
     </div>
 </div>
@@ -249,6 +301,14 @@
     let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
     let recordsCache = [], currentTypeFilter = "";
     let detectTimer = null;
+
+    // 出庫處理狀態管理
+    let processingStatuses = {
+        processing: [],
+        completed: [],
+        problem: [],
+        solved: []
+    };
 
     function showToast(msg = "存檔成功！") { const t = document.getElementById('toast'); t.innerText = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2000); }
     function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
@@ -348,156 +408,97 @@
         let filtered = recordsCache.map((r, index) => ({ data: r, oriIndex: index }));
         filtered = filtered.filter(item => {
             const r = item.data;
-            const type = r[10] || "使用";
-            const matchType = !currentTypeFilter || type === currentTypeFilter;
-            const matchUser = r[6].toLowerCase().includes(fUser);
-            const matchOrder = String(r[7]).toLowerCase().includes(fOrder);
-            const matchDate = !fDate || new Date(r[0]).toISOString().split('T')[0] === fDate;
-            return matchType && matchUser && matchOrder && matchDate;
+            if (currentTypeFilter && r[10] !== currentTypeFilter) return false;
+            if (fUser && !r[6].toLowerCase().includes(fUser)) return false;
+            if (fOrder && !r[7].toLowerCase().includes(fOrder)) return false;
+            if (fDate) {
+                const rDate = new Date(r[0]).toISOString().split('T')[0];
+                if (rDate !== fDate) return false;
+            }
+            if (fAct === 'unact' && r[9] !== '未啟動') return false;
+            if (fAct === 'act' && r[9] !== '已啟動') return false;
+            return true;
         });
-        filtered.sort((a, b) => sortDesc ? new Date(b.data[0]) - new Date(a.data[0]) : new Date(a.data[0]) - new Date(b.data[0]));
-        const body = document.getElementById('recordsBody');
-        body.innerHTML = "";
-        for (const item of filtered) {
+        if (sortDesc) filtered.reverse();
+        const tbody = document.getElementById('recordsTableBody');
+        tbody.innerHTML = "";
+        filtered.forEach(item => {
             const r = item.data;
-            const idx = item.oriIndex;
-            const isDel = r[9] === "已登記刪除";
-            const type = r[10] || "使用";
-            const typeClass = type === "登記" ? "type-reg" : "type-use";
             const tr = document.createElement('tr');
-            tr.id = `row-${idx}`;
-            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td id="act-status-${idx}">讀取中...</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
-            body.appendChild(tr);
-            if (!isDel) checkActivationStatus(r[3], r[4], idx, fAct);
-            else document.getElementById(`act-status-${idx}`).innerText = "-";
-        }
+            const typeSpan = `<span class="${r[10] === '登記' ? 'type-reg' : 'type-use'}">${r[10]}</span>`;
+            const statusSpan = `<span class="status-badge ${r[9] === '未啟動' ? 'status-unact' : (r[9] === '已啟動' ? 'status-act' : 'status-part')}">${r[9]}</span>`;
+            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td>${typeSpan}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${statusSpan}</td><td><button class="del-btn" onclick="deleteRow(${item.oriIndex})">刪除</button></td>`;
+            tbody.appendChild(tr);
+        });
         hideLoading();
     }
 
-    async function checkActivationStatus(start, end, idx, filter) {
-        const res = await fetch(`${API_URL}?action=checkActivation&start=${start}&end=${end}`);
+    let useSmartDetectDebounced = debounce(useSmartDetect, 500);
+    let useAutoPreviewDebounced = debounce(useAutoPreview, 500);
+    let useSmartDetectListDebounced = debounce(useSmartDetectList, 500);
+
+    function debounce(func, delay) { let timer; return function(...args) { clearTimeout(timer); timer = setTimeout(() => func(...args), delay); }; }
+
+    async function useSmartDetect() {
+        const start = document.getElementById('useStart').value.trim();
+        if (!start) return;
+        const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(start)}`);
         const data = await res.json();
-        const container = document.getElementById(`act-status-${idx}`);
-        const isAllAct = data.unactivatedCount === 0;
-        const isAllUnact = data.unactivatedCount === data.total;
-        if (filter === "unact" && isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
-        if (filter === "act" && !isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
-        if (isAllAct) container.innerHTML = `<span class="status-badge status-act">已全啟動</span>`;
-        else if (isAllUnact) container.innerHTML = `<span class="status-badge status-unact">全部未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-        else container.innerHTML = `<span class="status-badge status-part">部分未啟動</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-    }
-
-    function toggleUseMode(m) {
-        document.getElementById('useRangeSection').style.display = (m === 'range') ? 'block' : 'none';
-        document.getElementById('useListSection').style.display = (m === 'list') ? 'block' : 'none';
-        document.getElementById('pRangeDisplay').style.display = (m === 'range') ? 'block' : 'none';
-        document.getElementById('pListDisplay').style.display = (m === 'list') ? 'block' : 'none';
-        useAutoPreview();
-    }
-
-    function useSmartDetectDebounced() {
-        clearTimeout(detectTimer);
-        detectTimer = setTimeout(() => useSmartDetect(), 500);
-    }
-
-    function useSmartDetectListDebounced() {
-        clearTimeout(detectTimer);
-        detectTimer = setTimeout(() => useSmartDetectList(), 500);
-        // 即時更新數量計數
-        const codes = document.getElementById('useCodes').value.split('\n').filter(c => c.trim() !== "");
-        document.getElementById('pCountText').innerText = "(目前清單: " + codes.length + " 張)";
-    }
-
-    function useAutoPreviewDebounced() {
-        clearTimeout(detectTimer);
-        detectTimer = setTimeout(() => useAutoPreview(), 500);
-    }
-
-    function useSmartDetect() {
-        const s = document.getElementById('useStart').value.trim();
-        if (!s) return;
-        localDetectSupplier(s);
-    }
-
-    function useSmartDetectList() {
-        const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
-        if (codes.length > 0) {
-            localDetectSupplier(codes[0]);
-        } else {
-            document.getElementById('previewBox').style.display = 'none';
+        if (data.success) {
+            document.getElementById('useSupplierSelect').value = data.supplier;
+            useUpdateGiftSelect();
+            document.getElementById('useGiftSelect').value = data.giftName;
+            useAutoPreview();
         }
     }
 
-    function localDetectSupplier(code) {
-        // V3.5.5 本地即時識別：毫秒級匹配 Config 規則
-        let found = false;
-        for (const config of giftDatabase) {
-            if (code.startsWith(config.rule1)) {
-                // 如果有長度限制 (Rule2 是數字)
-                if (config.rule2 && !isNaN(config.rule2)) {
-                    if (code.length === parseInt(config.rule2)) {
-                        applyLocalMatch(config.supplier, config.name);
-                        found = true; break;
-                    }
-                } else {
-                    applyLocalMatch(config.supplier, config.name);
-                    found = true; break;
-                }
-            }
-        }
-        // 若本地未匹配，再非同步請求後端備援
-        if (!found) {
-            fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
-                .then(r => r.json()).then(d => { if(d.success) applyLocalMatch(d.supplier, d.giftName); });
+    async function useSmartDetectList() {
+        const codes = document.getElementById('useCodes').value.trim().split('\n').filter(c => c.trim() !== "");
+        if (codes.length === 0) return;
+        const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(codes[0])}`);
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('useSupplierSelect').value = data.supplier;
+            useUpdateGiftSelect();
+            document.getElementById('useGiftSelect').value = data.giftName;
+            useAutoPreview();
         }
     }
 
-    function applyLocalMatch(supplier, giftName) {
-        const sSelect = document.getElementById('useSupplierSelect');
-        if (sSelect.value !== supplier) {
-            sSelect.value = supplier;
-            useUpdateGiftSelect(giftName);
-        } else {
-            const gSelect = document.getElementById('useGiftSelect');
-            if (gSelect.value !== giftName) {
-                gSelect.value = giftName;
-                useAutoPreview();
-            }
-        }
-    }
-
-    function useUpdateGiftSelect(targetGiftName) {
+    function useUpdateGiftSelect() {
         const s = document.getElementById('useSupplierSelect').value;
-        const filtered = giftDatabase.filter(i => i.supplier === s);
-        const select = document.getElementById('useGiftSelect');
-        select.innerHTML = '<option value="">請選擇</option>' + filtered.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
-        if (targetGiftName) select.value = targetGiftName;
-        useAutoPreview();
+        const g = document.getElementById('useGiftSelect');
+        g.innerHTML = '<option value="">請選擇</option>';
+        giftDatabase.filter(r => r.supplier === s).forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.name;
+            opt.text = r.name;
+            g.appendChild(opt);
+        });
     }
 
-    function useAutoPreview() {
+    async function useAutoPreview() {
         const mode = document.getElementById('useMode').value;
-        const s_select = document.getElementById('useSupplierSelect').value;
-        const g_select = document.getElementById('useGiftSelect').value;
+        const supplier = document.getElementById('useSupplierSelect').value;
+        const gift = document.getElementById('useGiftSelect').value;
         
+        if (!supplier || !gift) { document.getElementById('previewBox').style.display = 'none'; return; }
+        
+        let codes = [];
         if (mode === 'range') {
-            const s = document.getElementById('useStart').value.trim();
-            const e = document.getElementById('useEnd').value.trim();
-            if (s && e && s_select && g_select) usePreviewData(getRangeCodes(s, e), s, e);
-            else document.getElementById('previewBox').style.display = 'none';
+            const start = document.getElementById('useStart').value.trim();
+            const end = document.getElementById('useEnd').value.trim();
+            if (!start || !end) { document.getElementById('previewBox').style.display = 'none'; return; }
+            codes = getRangeCodes(start, end);
         } else {
-            const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
-            if (codes.length > 0 && s_select && g_select) usePreviewData(codes, codes[0], codes[codes.length-1]);
-            else document.getElementById('previewBox').style.display = 'none';
+            codes = document.getElementById('useCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "");
         }
-    }
-
-    async function usePreviewData(codes, displayStart, displayEnd) {
-        const s_select = document.getElementById('useSupplierSelect').value;
-        const g_select = document.getElementById('useGiftSelect').value;
-        // 關鍵修復：同時比對供應商與項目名稱，避免同名項目抓錯資料
-        const match = giftDatabase.find(i => i.supplier === s_select && i.name === g_select);
-        if (match && codes.length > 0) {
+        
+        if (codes.length === 0) { document.getElementById('previewBox').style.display = 'none'; return; }
+        
+        const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
+        if (match) {
+            const displayStart = codes[0], displayEnd = codes[codes.length - 1];
             document.getElementById('pSup').innerText = match.supplier;
             document.getElementById('pGift').innerText = match.name;
             document.getElementById('pStart').innerText = displayStart;
@@ -528,7 +529,6 @@
         const orderNo = document.getElementById('useOrderNo').value;
         if (!orderNo) { alert('請填寫訂單號'); return; }
         
-        // 強化重複警示彈窗：強制檢查 UI 狀態
         const warningBox = document.getElementById('usageWarning');
         const isDuplicate = warningBox && warningBox.style.display === 'block';
         
@@ -537,11 +537,24 @@
             if (!confirm(confirmMsg)) return;
         }
         
-        showLoading();
         const codes = window.currentUseCodes;
         const match = window.currentUseMatch;
+        const processId = generateProcessId();
+        const startTime = new Date();
+
+        // 添加到處理中列表
+        addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime);
+
+        // 立即清空表單以便下一單使用
+        document.getElementById('useStart').value = ""; 
+        document.getElementById('useEnd').value = ""; 
+        document.getElementById('useCodes').value = "";
+        document.getElementById('useOrderNo').value = ""; 
+        document.getElementById('useSupplierSelect').value = "";
+        document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
+        document.getElementById('previewBox').style.display = 'none';
+
         try {
-            // V3.5.3 極速整合版：單一請求完成所有後端更新
             const res = await fetch(API_URL, { 
                 method: "POST", 
                 body: JSON.stringify({ 
@@ -561,17 +574,157 @@
             });
             const data = await res.json();
             if (data.result === "success") {
-                hideLoading(); showToast("已完成記錄");
-                document.getElementById('useStart').value = ""; 
-                document.getElementById('useEnd').value = ""; 
-                document.getElementById('useCodes').value = "";
-                document.getElementById('useOrderNo').value = ""; 
-                document.getElementById('useSupplierSelect').value = "";
-                document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
-                document.getElementById('previewBox').style.display = 'none';
+                updateProcessingStatus(processId, 'completed', startTime);
+                showToast("已完成記錄");
                 loadStats();
-            } else { throw new Error(data.message); }
-        } catch (err) { alert("提交失敗: " + err.message); hideLoading(); }
+            } else { 
+                throw new Error(data.message); 
+            }
+        } catch (err) { 
+            updateProcessingStatus(processId, 'problem', startTime, err.message);
+            alert("提交失敗: " + err.message); 
+        }
+    }
+
+    function generateProcessId() {
+        return 'proc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime) {
+        processingStatuses.processing.push({
+            id: id,
+            orderNo: orderNo,
+            count: count,
+            supplier: supplier,
+            gift: gift,
+            startTime: startTime,
+            status: 'processing'
+        });
+        updateStatusDisplay();
+    }
+
+    function updateProcessingStatus(id, newStatus, startTime, errorMsg = '') {
+        const item = processingStatuses.processing.find(p => p.id === id);
+        if (!item) return;
+
+        processingStatuses.processing = processingStatuses.processing.filter(p => p.id !== id);
+
+        const duration = ((new Date() - startTime) / 1000).toFixed(1);
+        const statusItem = {
+            id: id,
+            orderNo: item.orderNo,
+            count: item.count,
+            supplier: item.supplier,
+            gift: item.gift,
+            startTime: startTime,
+            duration: duration,
+            errorMsg: errorMsg,
+            status: newStatus
+        };
+
+        if (newStatus === 'completed') {
+            processingStatuses.completed.unshift(statusItem);
+            if (processingStatuses.completed.length > 3) {
+                processingStatuses.completed = processingStatuses.completed.slice(0, 3);
+            }
+        } else if (newStatus === 'problem') {
+            processingStatuses.problem.unshift(statusItem);
+        } else if (newStatus === 'solved') {
+            processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
+            processingStatuses.solved = [statusItem];
+        }
+
+        updateStatusDisplay();
+    }
+
+    function markProblemAsSolved(id) {
+        const problem = processingStatuses.problem.find(p => p.id === id);
+        if (problem) {
+            updateProcessingStatus(id, 'solved', problem.startTime);
+        }
+    }
+
+    function updateStatusDisplay() {
+        // 更新處理中
+        const processingList = document.getElementById('processingList');
+        processingList.innerHTML = processingStatuses.processing.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
+        processingStatuses.processing.forEach(item => {
+            const elapsed = ((new Date() - item.startTime) / 1000).toFixed(1);
+            processingList.innerHTML += `
+                <div class="status-item processing">
+                    <div class="status-item-header">
+                        訂單: ${item.orderNo}
+                        <span class="status-item-time">${elapsed}s</span>
+                    </div>
+                    <div class="status-item-content">
+                        ${item.supplier} - ${item.gift}<br/>
+                        數量: ${item.count} 張
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('processingCount').innerText = processingStatuses.processing.length;
+
+        // 更新已完成
+        const completedList = document.getElementById('completedList');
+        completedList.innerHTML = processingStatuses.completed.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
+        processingStatuses.completed.forEach(item => {
+            completedList.innerHTML += `
+                <div class="status-item completed">
+                    <div class="status-item-header">
+                        訂單: ${item.orderNo}
+                        <span class="status-item-time">${item.duration}s</span>
+                    </div>
+                    <div class="status-item-content">
+                        ${item.supplier} - ${item.gift}<br/>
+                        數量: ${item.count} 張
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('completedCount').innerText = processingStatuses.completed.length;
+
+        // 更新有問題
+        const problemList = document.getElementById('problemList');
+        problemList.innerHTML = processingStatuses.problem.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
+        processingStatuses.problem.forEach(item => {
+            problemList.innerHTML += `
+                <div class="status-item problem">
+                    <div class="status-item-header">
+                        訂單: ${item.orderNo}
+                        <span class="status-item-time">${item.duration}s</span>
+                    </div>
+                    <div class="status-item-content">
+                        ${item.supplier} - ${item.gift}<br/>
+                        數量: ${item.count} 張
+                    </div>
+                    <div class="status-item-problems">
+                        <strong>問題:</strong> ${item.errorMsg}
+                    </div>
+                    <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">標記已解決</button>
+                </div>
+            `;
+        });
+        document.getElementById('problemCount').innerText = processingStatuses.problem.length;
+
+        // 更新問題已解決
+        const solvedList = document.getElementById('solvedList');
+        solvedList.innerHTML = processingStatuses.solved.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
+        processingStatuses.solved.forEach(item => {
+            solvedList.innerHTML += `
+                <div class="status-item solved">
+                    <div class="status-item-header">
+                        訂單: ${item.orderNo}
+                        <span class="status-item-time">${item.duration}s</span>
+                    </div>
+                    <div class="status-item-content">
+                        ${item.supplier} - ${item.gift}<br/>
+                        數量: ${item.count} 張
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('solvedCount').innerText = processingStatuses.solved.length;
     }
 
     async function deleteRow(i) {
@@ -620,6 +773,7 @@
 
     function toggleRegMode(m) { document.getElementById('regList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('regRange').style.display = (m === 'range') ? 'block' : 'none'; }
     function toggleActMode(m) { document.getElementById('actList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('actRange').style.display = (m === 'range') ? 'block' : 'none'; }
+    function toggleUseMode(m) { document.getElementById('useRangeSection').style.display = (m === 'range') ? 'block' : 'none'; document.getElementById('useListSection').style.display = (m === 'list') ? 'block' : 'none'; }
     function updateGiftMenu() { var s = document.getElementById('supplierSelect').value; var g = document.getElementById('giftSelect'); g.innerHTML = '<option value="">請選擇</option>'; giftDatabase.filter(r => r.supplier === s).forEach(r => { var opt = document.createElement('option'); opt.value = r.name; opt.text = r.name; g.appendChild(opt); }); }
     function calculateExpiryDate(rule) { if (!rule || rule === 'N/A') return 'N/A'; if (rule.includes('m_end')) { const months = parseInt(rule); const date = new Date(); date.setMonth(date.getMonth() + months + 1); date.setDate(0); return date.toISOString().split('T')[0]; } return rule; }
     function getRangeCodes(start, end) { var sStr = start.toString().trim(); var eStr = end.toString().trim(); if(!sStr || !eStr) return []; var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/); var prefix = sMatch[1] || ""; var sNumStr = sMatch[2] || "0"; var eNumStr = eMatch[2] || "0"; var sVal = parseInt(sNumStr, 10); var eVal = parseInt(eNumStr, 10); var padLen = sNumStr.length; var codes = []; for (var i = sVal; i <= eVal; i++) { codes.push(prefix + i.toString().padStart(padLen, '0')); } return codes; }
