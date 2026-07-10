@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>禮券全能管理系統 V3.5.5 修復版</title>
+    <title>禮券全能管理系統 V3.6.0 終極極速版</title>
     <style>
     :root {
         --primary-pink: #ffb7c5;
@@ -20,7 +20,6 @@
     body { background-color: var(--soft-bg); padding: 20px; display: flex; justify-content: center; min-height: 100vh; color: var(--text-color); }
     .container { width: 100%; max-width: 1350px; background: #fff; padding: 25px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); }
     
-    /* 頁面切換核心樣式 */
     .main-section { display: none; }
     .main-section.active { display: block; }
     .sub-page { display: none; }
@@ -33,7 +32,7 @@
     label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 14px; }
     input, select, textarea { width: 100%; padding: 10px; border: 1px solid var(--primary-pink); border-radius: 8px; font-size: 14px; background: #fff; }
     button { padding: 8px 16px; background: var(--dark-pink); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
-    button:disabled { background: #e0e0e0; cursor: not-allowed; }
+    button:hover { opacity: 0.9; }
     .nav-btn { padding: 10px 15px; background: #fff0f3; color: #000; border: 1px solid var(--primary-pink); border-radius: 8px; cursor: pointer; font-weight: 600; margin-right: 5px; margin-bottom: 5px; }
     .nav-btn.active { background: var(--dark-pink); color: white; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -51,20 +50,21 @@
 </head>
 <body>
 
-<div id="loadingOverlay">處理中...</div>
+<div id="loadingOverlay">處理中，請稍候...</div>
 
 <div class="container">
-    <!-- 登入區塊 -->
     <div id="loginPage" class="main-section active">
-        <h2>禮券全能管理系統 V3.5.5</h2>
+        <h2>禮券全能管理系統 V3.6.0 終極版</h2>
         <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
         <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
-        <button onclick="handleLogin()" style="width:100%;">登入系統</button>
+        <button onclick="handleLogin()" style="width:100%;">進入極速系統</button>
     </div>
 
-    <!-- 主應用區塊 -->
     <div id="appPage" class="main-section">
-        <h2>禮券管理系統 <span id="userDisplay" style="font-size:14px; color:#86868b;"></span></h2>
+        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>禮券管理系統</h2>
+            <span id="userDisplay" style="font-weight: bold; color: var(--dark-pink);"></span>
+        </div>
         
         <nav style="margin-bottom:20px; display:flex; gap:10px; flex-wrap: wrap;">
             <button class="nav-btn active" onclick="switchSubPage('statsPage')">庫存與使用量統計</button>
@@ -74,54 +74,48 @@
             <button class="nav-btn" onclick="switchSubPage('recordsPage')">流水帳記錄管理</button>
         </nav>
 
-        <!-- 統計頁 -->
         <div id="statsPage" class="sub-page active">
-            <h2>庫存與使用量統計</h2>
             <div class="filter-bar">
-                <div class="form-group"><label>日期(起)</label><input type="date" id="statStart" onchange="loadStats()"></div>
-                <div class="form-group"><label>日期(終)</label><input type="date" id="statEnd" onchange="loadStats()"></div>
                 <div class="form-group"><label>供應商</label><select id="statSupplier" onchange="updateStatGiftMenu(); loadStats()"><option value="">全部</option></select></div>
                 <div class="form-group"><label>項目</label><select id="statGift" onchange="loadStats()"><option value="">全部</option></select></div>
+                <button onclick="loadStats()" style="height: 40px; margin-top: 22px;">刷新統計</button>
             </div>
             <table><thead><tr><th>項目名稱</th><th>供應商</th><th>總入庫</th><th>總使用</th><th>剩餘庫存</th><th>已啟動</th></tr></thead><tbody id="statsTableBody"></tbody></table>
         </div>
 
-        <!-- 登記頁 -->
         <div id="regPage" class="sub-page">
-            <h2>登記入庫 (Batch: <span id="batchDisplay">...</span>)</h2>
+            <h3>登記入庫 (目前批次: <span id="batchDisplay">...</span>)</h3>
             <div class="reg-grid">
                 <div>
-                    <div class="form-group"><label>輸入模式</label><select id="regMode" onchange="toggleRegMode(this.value)"><option value="range" selected>範圍輸入</option><option value="list">清單輸入</option></select></div>
-                    <div id="regList" style="display:none;" class="form-group"><label>Code 清單</label><textarea id="regCodes" oninput="calcTotal('regCodes', 'regTotal')"></textarea></div>
-                    <div id="regRange"><div class="form-group"><label>首碼</label><input type="text" id="regStart" oninput="calcTotalRange('reg')"></div><div class="form-group"><label>尾碼</label><input type="text" id="regEnd" oninput="calcTotalRange('reg')"></div></div>
+                    <div class="form-group"><label>輸入模式</label><select id="regMode" onchange="toggleRegMode(this.value)"><option value="range">範圍輸入</option><option value="list">清單輸入</option></select></div>
+                    <div id="regList" style="display:none;" class="form-group"><label>Code 清單 (一行一個)</label><textarea id="regCodes" rows="5" oninput="calcTotal('regCodes', 'regTotal')"></textarea></div>
+                    <div id="regRange"><div class="form-group"><label>起始代碼</label><input type="text" id="regStart" oninput="calcTotalRange('reg')"></div><div class="form-group"><label>結束代碼</label><input type="text" id="regEnd" oninput="calcTotalRange('reg')"></div></div>
                 </div>
                 <div>
                     <div class="form-group"><label>供應商</label><select id="supplierSelect" onchange="updateGiftMenu()"><option value="">請選擇</option></select></div>
                     <div class="form-group"><label>禮券項目</label><select id="giftSelect"><option value="">請選擇</option></select></div>
                 </div>
             </div>
-            <h3 id="regTotal">總張數: 0</h3>
-            <button onclick="register()" style="width:100%; padding: 12px;">確認登記入庫</button>
+            <h3 id="regTotal" style="color: var(--primary-blue);">總張數: 0</h3>
+            <button onclick="register()" style="width:100%; padding: 15px; font-size: 16px;">確認登記入庫</button>
         </div>
 
-        <!-- 啟用頁 -->
         <div id="actPage" class="sub-page">
-            <h2>禮券啟用管理</h2>
-            <div class="form-group"><label>輸入模式</label><select id="actMode" onchange="toggleActMode(this.value)"><option value="range" selected>範圍輸入</option><option value="list">清單輸入</option></select></div>
-            <div id="actList" style="display:none;" class="form-group"><label>Code 清單</label><textarea id="actCodes" oninput="calcTotal('actCodes', 'actTotal')"></textarea></div>
-            <div id="actRange"><div class="form-group"><label>起始</label><input type="text" id="actStart" oninput="calcTotalRange('act')"></div><div class="form-group"><label>結束</label><input type="text" id="actEnd" oninput="calcTotalRange('act')"></div></div>
-            <h3 id="actTotal">總張數: 0</h3>
-            <button onclick="activateGift()" style="width:100%; padding: 12px; background: var(--primary-blue);">確認啟用</button>
+            <h3>禮券批次啟用</h3>
+            <div class="form-group"><label>輸入模式</label><select id="actMode" onchange="toggleActMode(this.value)"><option value="range">範圍輸入</option><option value="list">清單輸入</option></select></div>
+            <div id="actList" style="display:none;" class="form-group"><label>Code 清單</label><textarea id="actCodes" rows="5" oninput="calcTotal('actCodes', 'actTotal')"></textarea></div>
+            <div id="actRange"><div class="form-group"><label>起始代碼</label><input type="text" id="actStart" oninput="calcTotalRange('act')"></div><div class="form-group"><label>結束代碼</label><input type="text" id="actEnd" oninput="calcTotalRange('act')"></div></div>
+            <h3 id="actTotal" style="color: var(--primary-blue);">總張數: 0</h3>
+            <button onclick="activateGift()" style="width:100%; padding: 15px; background: var(--primary-blue);">確認啟用禮券</button>
         </div>
 
-        <!-- 出庫頁 -->
         <div id="usePage" class="sub-page">
-            <h2>禮券使用 (出庫)</h2>
+            <h3>禮券使用 (出庫)</h3>
             <div class="reg-grid">
                 <div>
-                    <div class="form-group"><label>輸入模式</label><select id="useMode" onchange="toggleUseMode(this.value)"><option value="range" selected>範圍輸入</option><option value="list">清單輸入</option></select></div>
-                    <div id="useRangeSection"><div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetect()"></div><div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreview()"></div></div>
-                    <div id="useListSection" style="display:none;"><div class="form-group"><label>Code 清單</label><textarea id="useCodes" oninput="useSmartDetectList()"></textarea></div></div>
+                    <div class="form-group"><label>輸入模式</label><select id="useMode" onchange="toggleUseMode(this.value)"><option value="range">範圍輸入</option><option value="list">清單輸入</option></select></div>
+                    <div id="useRangeSection"><div class="form-group"><label>首碼 (輸入後自動偵測)</label><input type="text" id="useStart" oninput="useSmartDetect()"></div><div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreview()"></div></div>
+                    <div id="useListSection" style="display:none;"><div class="form-group"><label>Code 清單</label><textarea id="useCodes" rows="5" oninput="useSmartDetectList()"></textarea></div></div>
                 </div>
                 <div>
                     <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
@@ -129,28 +123,26 @@
                 </div>
             </div>
             <div id="previewBox">
-                <p><strong>預覽資訊</strong></p>
+                <p><strong>【即時預覽】</strong></p>
                 <p>供應商: <span id="pSup"></span> | 項目: <span id="pGift"></span></p>
-                <p>使用狀態: <span id="pUsageStatus"></span></p>
-                <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong></p>
-                <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
-                <div class="form-group" style="margin-top:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo"></div>
-                <button onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px;">確認使用 (正式出庫)</button>
+                <p>狀態檢查: <span id="pUsageStatus"></span></p>
+                <p>計算張數: <strong id="pCount" style="color:red; font-size:20px;"></strong></p>
+                <div id="usageWarning" class="usage-warning">⚠️ 注意：範圍內含已使用代碼，確認後將寫入二次登記區。</div>
+                <div class="form-group" style="margin-top:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" placeholder="請輸入訂單編號"></div>
+                <button onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; padding:15px; font-size: 16px;">確認出庫 (正式紀錄)</button>
             </div>
         </div>
 
-        <!-- 流水帳頁 -->
         <div id="recordsPage" class="sub-page">
-            <h2>流水帳記錄管理</h2>
             <div class="tab-container">
-                <button class="tab-btn active" onclick="filterRecordsByType('')">全部</button>
-                <button class="tab-btn" onclick="filterRecordsByType('使用')">使用</button>
-                <button class="tab-btn" onclick="filterRecordsByType('登記')">登記</button>
+                <button class="tab-btn active" onclick="filterRecordsByType('')">全部紀錄</button>
+                <button class="tab-btn" onclick="filterRecordsByType('使用')">使用紀錄</button>
+                <button class="tab-btn" onclick="filterRecordsByType('登記')">登記紀錄</button>
             </div>
             <div class="filter-bar">
-                <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderRecords()">
-                <input type="text" id="filterOrder" placeholder="篩選訂單號" oninput="renderRecords()">
-                <button onclick="loadRecords()" style="font-size:12px;">刷新</button>
+                <input type="text" id="filterUser" placeholder="人員搜尋" oninput="renderRecords()">
+                <input type="text" id="filterOrder" placeholder="訂單號搜尋" oninput="renderRecords()">
+                <button onclick="loadRecords()">重新載入</button>
             </div>
             <table id="recordsTable"><thead><tr><th>時間</th><th>類型</th><th>供應商</th><th>項目</th><th>首碼</th><th>尾碼</th><th>數量</th><th>人員</th><th>訂單號</th><th>啟動狀態</th><th>操作</th></tr></thead><tbody id="recordsTableBody"></tbody></table>
         </div>
@@ -167,20 +159,19 @@
     async function handleLogin() {
         const email = document.getElementById('loginEmail').value.trim();
         const code = document.getElementById('loginCode').value.trim();
-        if (!email || !code) return alert("請填寫 Email 與密碼");
+        if (!email || !code) return alert("請填寫登入資訊");
         showLoading();
         try {
             const res = await fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`);
             const data = await res.json();
             if (data.success) {
                 currentUser = data.name;
-                // 切換主區塊
                 document.getElementById('loginPage').classList.remove('active');
                 document.getElementById('appPage').classList.add('active');
-                document.getElementById('userDisplay').innerText = `| 使用者: ${currentUser}`;
+                document.getElementById('userDisplay').innerText = `👤 使用者: ${currentUser}`;
                 initBaseData();
-            } else alert("登入失敗，請檢查帳號密碼");
-        } catch (e) { alert("連線錯誤: " + e.message); }
+            } else alert("登入失敗，請檢查 Email 或密碼");
+        } catch (e) { alert("連線失敗: " + e.message); }
         hideLoading();
     }
 
@@ -195,31 +186,24 @@
             currentBatch = batchData.batch || "N/A";
             document.getElementById('batchDisplay').innerText = currentBatch;
             
-            // 清空並重新填充下拉選單
             ['supplierSelect', 'useSupplierSelect', 'statSupplier'].forEach(id => {
                 const s = document.getElementById(id);
                 s.innerHTML = (id === 'statSupplier') ? '<option value="">全部</option>' : '<option value="">請選擇</option>';
-                const suppliers = [...new Set(configData.map(c => c.supplier))];
-                suppliers.forEach(sup => s.add(new Option(sup, sup)));
+                [...new Set(configData.map(c => c.supplier))].forEach(sup => s.add(new Option(sup, sup)));
             });
-            
             loadStats();
-        } catch (e) { alert("初始化資料失敗: " + e.message); }
+        } catch (e) { console.error("初始化失敗", e); }
     }
 
     function switchSubPage(pageId) {
-        // 只切換子頁面，不影響主區塊
         document.querySelectorAll('.sub-page').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-        
         document.getElementById(pageId).classList.add('active');
         event.target.classList.add('active');
-        
         if (pageId === 'recordsPage') loadRecords();
-        if (pageId === 'statsPage') loadStats();
     }
 
-    // 出庫邏輯
+    // 核心邏輯恢復
     function useSmartDetect() {
         const code = document.getElementById('useStart').value.trim();
         if (code.length < 3) return;
@@ -232,11 +216,12 @@
 
     function useSmartDetectList() {
         const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c);
-        if (codes.length === 0) return;
-        const matching = configData.find(c => codes[0].startsWith(c.rule1) || codes[0].startsWith(c.rule2));
-        if (matching) {
-            document.getElementById('useSupplierSelect').value = matching.supplier;
-            useUpdateGiftSelect(matching.name);
+        if (codes.length > 0) {
+            const matching = configData.find(c => codes[0].startsWith(c.rule1) || codes[0].startsWith(c.rule2));
+            if (matching) {
+                document.getElementById('useSupplierSelect').value = matching.supplier;
+                useUpdateGiftSelect(matching.name);
+            }
         }
     }
 
@@ -255,16 +240,9 @@
         if (!sup || !gift) return;
 
         const mode = document.getElementById('useMode').value;
-        let codes = [];
-        if (mode === 'range') {
-            const start = document.getElementById('useStart').value.trim();
-            const end = document.getElementById('useEnd').value.trim();
-            if (!start || !end) return;
-            codes = getRangeCodes(start, end);
-        } else {
-            codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c);
-            if (codes.length === 0) return;
-        }
+        let codes = (mode === 'range') ? getRangeCodes(document.getElementById('useStart').value, document.getElementById('useEnd').value) : 
+                                       document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c);
+        if (codes.length === 0) return;
 
         document.getElementById('previewBox').style.display = 'block';
         document.getElementById('pSup').innerText = sup;
@@ -275,49 +253,41 @@
             const res = await fetch(`${API_URL}?action=checkUsage&codes=${JSON.stringify(codes)}`);
             const data = await res.json();
             const isUsed = data.usedCodes && data.usedCodes.length > 0;
-            document.getElementById('pUsageStatus').innerText = isUsed ? "❌ 偵測到重複代碼" : "✓ 未使用";
+            document.getElementById('pUsageStatus').innerText = isUsed ? "❌ 警告：部分代碼已使用過" : "✅ 狀態正常：代碼皆未使用";
             document.getElementById('pUsageStatus').style.color = isUsed ? "red" : "green";
             document.getElementById('usageWarning').style.display = isUsed ? "block" : "none";
-        } catch (e) { console.error("預覽檢查失敗:", e); }
+        } catch (e) { console.error("預覽檢查失敗", e); }
     }
 
     async function useConfirmSubmit() {
         const orderNo = document.getElementById('useOrderNo').value.trim();
-        if (!orderNo) return alert("請填寫訂單號");
-        
+        if (!orderNo) return alert("請輸入訂單號");
         const isUsed = document.getElementById('usageWarning').style.display === 'block';
-        if (isUsed && !confirm("偵測到重複代碼，確定要繼續登記嗎？(將記錄在二次欄位)")) return;
+        if (isUsed && !confirm("偵測到重複代碼，確定要進行二次登記嗎？")) return;
 
         showLoading();
         const mode = document.getElementById('useMode').value;
         let codes = (mode === 'range') ? getRangeCodes(document.getElementById('useStart').value, document.getElementById('useEnd').value) : 
                                        document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c);
         
-        const payload = { mode: 'use', user: currentUser, codes: codes, supplier: document.getElementById('useSupplierSelect').value, 
-                         gift: document.getElementById('useGiftSelect').value, orderNo: orderNo };
-
         try {
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'use', user: currentUser, codes, supplier: document.getElementById('useSupplierSelect').value, gift: document.getElementById('useGiftSelect').value, orderNo }) });
             const data = await res.json();
             if (data.result === 'success') {
-                alert("出庫完成！");
-                // 清除欄位
-                document.getElementById('useStart').value = "";
-                document.getElementById('useEnd').value = "";
-                document.getElementById('useCodes').value = "";
-                document.getElementById('useOrderNo').value = "";
+                alert("出庫成功！");
+                ['useStart', 'useEnd', 'useCodes', 'useOrderNo'].forEach(id => document.getElementById(id).value = "");
                 document.getElementById('useSupplierSelect').value = "";
                 document.getElementById('useGiftSelect').value = "";
                 document.getElementById('previewBox').style.display = 'none';
-            } else alert("出庫失敗: " + (data.error || "未知錯誤"));
-        } catch (e) { alert("出庫發生錯誤: " + e.message); }
+            } else alert("錯誤: " + data.error);
+        } catch (e) { alert("連線錯誤: " + e.message); }
         hideLoading();
     }
 
-    // 輔助工具
+    // 通用工具
     function getRangeCodes(start, end) {
-        const sMatch = start.match(/^([A-Za-z]*)(.*)$/);
-        const eMatch = end.match(/^([A-Za-z]*)(.*)$/);
+        const sMatch = start.trim().match(/^([A-Za-z]*)(.*)$/);
+        const eMatch = end.trim().match(/^([A-Za-z]*)(.*)$/);
         if (!sMatch || !eMatch) return [];
         const prefix = sMatch[1], sNum = parseInt(sMatch[2]) || 0, eNum = parseInt(eMatch[2]) || 0;
         const padLen = sMatch[2].length, codes = [];
@@ -325,46 +295,28 @@
         return codes;
     }
 
-    function calcTotal(textareaId, displayId) {
-        const codes = document.getElementById(textareaId).value.split('\n').filter(c => c.trim()).length;
-        document.getElementById(displayId).innerText = `總張數: ${codes}`;
+    function calcTotal(tid, did) {
+        const len = document.getElementById(tid).value.split('\n').filter(c => c.trim()).length;
+        document.getElementById(did).innerText = `總張數: ${len}`;
     }
 
-    function calcTotalRange(prefix) {
-        const start = document.getElementById(prefix + 'Start').value.trim();
-        const end = document.getElementById(prefix + 'End').value.trim();
-        if (!start || !end) return;
-        const codes = getRangeCodes(start, end);
-        document.getElementById(prefix + 'Total').innerText = `總張數: ${codes.length}`;
+    function calcTotalRange(pre) {
+        const len = getRangeCodes(document.getElementById(pre + 'Start').value, document.getElementById(pre + 'End').value).length;
+        document.getElementById(pre + 'Total').innerText = `總張數: ${len}`;
     }
 
-    function toggleRegMode(v) {
-        document.getElementById('regList').style.display = v === 'list' ? 'block' : 'none';
-        document.getElementById('regRange').style.display = v === 'range' ? 'block' : 'none';
-    }
-
-    function toggleActMode(v) {
-        document.getElementById('actList').style.display = v === 'list' ? 'block' : 'none';
-        document.getElementById('actRange').style.display = v === 'range' ? 'block' : 'none';
-    }
-
-    function toggleUseMode(v) {
-        document.getElementById('useListSection').style.display = v === 'list' ? 'block' : 'none';
-        document.getElementById('useRangeSection').style.display = v === 'range' ? 'block' : 'none';
-        useAutoPreview();
-    }
+    function toggleRegMode(v) { document.getElementById('regList').style.display = v==='list'?'block':'none'; document.getElementById('regRange').style.display = v==='range'?'block':'none'; }
+    function toggleActMode(v) { document.getElementById('actList').style.display = v==='list'?'block':'none'; document.getElementById('actRange').style.display = v==='range'?'block':'none'; }
+    function toggleUseMode(v) { document.getElementById('useListSection').style.display = v==='list'?'block':'none'; document.getElementById('useRangeSection').style.display = v==='range'?'block':'none'; useAutoPreview(); }
 
     async function loadStats() {
         const sup = document.getElementById('statSupplier').value;
         const gift = document.getElementById('statGift').value;
-        const start = document.getElementById('statStart').value;
-        const end = document.getElementById('statEnd').value;
         try {
-            const res = await fetch(`${API_URL}?action=getStats&supplier=${sup}&gift=${gift}&start=${start}&end=${end}`);
+            const res = await fetch(`${API_URL}?action=getStats&supplier=${sup}&gift=${gift}`);
             const data = await res.json();
-            const tbody = document.getElementById('statsTableBody');
-            tbody.innerHTML = (data || []).map(r => `<tr><td>${r.giftName}</td><td>${r.supplier}</td><td>${r.total}</td><td>${r.used}</td><td>${r.total - r.used}</td><td>${r.activated}</td></tr>`).join('');
-        } catch (e) { console.error("加載統計失敗:", e); }
+            document.getElementById('statsTableBody').innerHTML = data.map(r => `<tr><td>${r.giftName}</td><td>${r.supplier}</td><td>${r.total}</td><td>${r.used}</td><td>${r.total-r.used}</td><td>${r.activated}</td></tr>`).join('');
+        } catch (e) { console.error(e); }
     }
 
     function updateStatGiftMenu() {
@@ -385,59 +337,38 @@
         const sup = document.getElementById('supplierSelect').value;
         const gift = document.getElementById('giftSelect').value;
         if (!sup || !gift) return alert("請選擇供應商與項目");
-
         const mode = document.getElementById('regMode').value;
-        let codes = [];
-        if (mode === 'range') {
-            const start = document.getElementById('regStart').value.trim();
-            const end = document.getElementById('regEnd').value.trim();
-            if (!start || !end) return alert("請填寫首尾碼");
-            codes = getRangeCodes(start, end);
-        } else {
-            codes = document.getElementById('regCodes').value.split('\n').map(c => c.trim()).filter(c => c);
-            if (codes.length === 0) return alert("請填寫代碼清單");
-        }
-
+        let codes = (mode === 'range') ? getRangeCodes(document.getElementById('regStart').value, document.getElementById('regEnd').value) : 
+                                       document.getElementById('regCodes').value.split('\n').map(c => c.trim()).filter(c => c);
+        if (codes.length === 0) return alert("請輸入代碼");
         showLoading();
         try {
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'register', user: currentUser, codes: codes, supplier: sup, gift: gift, batch: currentBatch }) });
+            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'register', user: currentUser, codes, supplier: sup, gift, batch: currentBatch }) });
             const data = await res.json();
             if (data.result === 'success') {
                 alert("登記成功！");
-                document.getElementById('regStart').value = "";
-                document.getElementById('regEnd').value = "";
-                document.getElementById('regCodes').value = "";
+                ['regStart', 'regEnd', 'regCodes'].forEach(id => document.getElementById(id).value = "");
                 document.getElementById('regTotal').innerText = "總張數: 0";
-            } else alert("登記失敗: " + (data.error || "未知錯誤"));
-        } catch (e) { alert("登記發生錯誤: " + e.message); }
+            } else alert("錯誤: " + data.error);
+        } catch (e) { alert(e.message); }
         hideLoading();
     }
 
     async function activateGift() {
         const mode = document.getElementById('actMode').value;
-        let codes = [];
-        if (mode === 'range') {
-            const start = document.getElementById('actStart').value.trim();
-            const end = document.getElementById('actEnd').value.trim();
-            if (!start || !end) return alert("請填寫首尾碼");
-            codes = getRangeCodes(start, end);
-        } else {
-            codes = document.getElementById('actCodes').value.split('\n').map(c => c.trim()).filter(c => c);
-            if (codes.length === 0) return alert("請填寫代碼清單");
-        }
-
+        let codes = (mode === 'range') ? getRangeCodes(document.getElementById('actStart').value, document.getElementById('actEnd').value) : 
+                                       document.getElementById('actCodes').value.split('\n').map(c => c.trim()).filter(c => c);
+        if (codes.length === 0) return alert("請輸入代碼");
         showLoading();
         try {
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'activate', user: currentUser, codes: codes }) });
+            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'activate', user: currentUser, codes }) });
             const data = await res.json();
             if (data.result === 'success') {
                 alert("啟用成功！");
-                document.getElementById('actStart').value = "";
-                document.getElementById('actEnd').value = "";
-                document.getElementById('actCodes').value = "";
+                ['actStart', 'actEnd', 'actCodes'].forEach(id => document.getElementById(id).value = "");
                 document.getElementById('actTotal').innerText = "總張數: 0";
-            } else alert("啟用失敗: " + (data.error || "未知錯誤"));
-        } catch (e) { alert("啟用發生錯誤: " + e.message); }
+            } else alert("錯誤: " + data.error);
+        } catch (e) { alert(e.message); }
         hideLoading();
     }
 
@@ -447,25 +378,23 @@
             const res = await fetch(`${API_URL}?action=getRecords`);
             allRecords = await res.json() || [];
             renderRecords();
-        } catch (e) { alert("加載記錄失敗: " + e.message); }
+        } catch (e) { console.error(e); }
         hideLoading();
     }
 
     function renderRecords() {
         const userF = document.getElementById('filterUser').value.toLowerCase();
         const orderF = document.getElementById('filterOrder').value.toLowerCase();
-        
         const filtered = allRecords.filter(r => {
-            if (currentRecordType && r[10] !== currentRecordType) return false;
+            if (currentRecordType && r[8] !== currentRecordType) return false;
             if (userF && !r[6].toLowerCase().includes(userF)) return false;
             if (orderF && !r[7].toString().toLowerCase().includes(orderF)) return false;
             return true;
         });
-
         document.getElementById('recordsTableBody').innerHTML = filtered.map((r, i) => `
             <tr>
                 <td>${new Date(r[0]).toLocaleString()}</td>
-                <td style="color:black; font-weight:bold;">${r[10]}</td>
+                <td style="color:black; font-weight:bold;">${r[8]}</td>
                 <td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td>
                 <td>${r[9]}</td>
                 <td><button class="del-btn" onclick="deleteRecord(${allRecords.indexOf(r)})">刪除</button></td>
@@ -481,16 +410,13 @@
     }
 
     async function deleteRecord(idx) {
-        if (!confirm("確定要刪除此記錄嗎？")) return;
+        if (!confirm("確定要刪除此紀錄嗎？")) return;
         showLoading();
         try {
             const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'deleteRecord', user: currentUser, recordIndex: idx }) });
             const data = await res.json();
-            if (data.result === 'success') {
-                alert("刪除成功！");
-                loadRecords();
-            } else alert("刪除失敗");
-        } catch (e) { alert("刪除發生錯誤: " + e.message); }
+            if (data.result === 'success') { alert("刪除成功！"); loadRecords(); }
+        } catch (e) { alert(e.message); }
         hideLoading();
     }
 </script>
