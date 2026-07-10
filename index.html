@@ -500,26 +500,26 @@
         const codes = window.currentUseCodes;
         const match = window.currentUseMatch;
         try {
+            // 整合請求：一次發送狀態更新與流水帳資訊
             const res = await fetch(API_URL, { 
                 method: "POST", 
-                body: JSON.stringify({ mode: 'use', user: currentUser, payload: codes.map(c => ({Code: c, OrderNo: orderNo})) }) 
+                body: JSON.stringify({ 
+                    mode: 'use', 
+                    user: currentUser, 
+                    payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
+                    recordInfo: {
+                        supplier: match.supplier,
+                        gift: match.name,
+                        start: codes[0],
+                        end: codes[codes.length-1],
+                        count: codes.length,
+                        orderNo: orderNo,
+                        expiry: document.getElementById('pExpiry').innerText
+                    }
+                }) 
             });
             const data = await res.json();
             if (data.result === "success") {
-                await fetch(API_URL, { 
-                    method: 'POST', 
-                    body: JSON.stringify({ 
-                        action: 'insertRecord', 
-                        supplier: match.supplier, 
-                        gift: match.name, 
-                        start: codes[0], 
-                        end: codes[codes.length-1], 
-                        count: codes.length, 
-                        user: currentUser, 
-                        orderNo: orderNo, 
-                        expiry: document.getElementById('pExpiry').innerText 
-                    }) 
-                });
                 hideLoading(); showToast("已完成記錄");
                 document.getElementById('useStart').value = ""; 
                 document.getElementById('useEnd').value = ""; 
