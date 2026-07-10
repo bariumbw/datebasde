@@ -125,7 +125,7 @@
                                 <th>總入庫</th>
                                 <th>總使用</th>
                                 <th>剩餘庫存</th>
-                                <th>已啟動</th>
+                                <th>未使用並已啟動</th>
                             </tr>
                         </thead>
                         <tbody id="statsTableBody"></tbody>
@@ -223,7 +223,10 @@
                     <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
                     <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong> <span id="pCountText" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
                     <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
-                    <div class="form-group" style="margin-top:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
+                </div>
+                <!-- 訂單號與確認按鈕獨立於預覽資訊之外，永遠顯示 -->
+                <div style="margin-top:15px;">
+                    <div class="form-group"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                     <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
                 </div>
             </div>
@@ -520,12 +523,27 @@
 
     // 未識別前先顯示範圍數量
     function useUpdateRangeCount() {
-        const s = document.getElementById('useStart').value.trim();
-        const e = document.getElementById('useEnd').value.trim();
+        let s = document.getElementById('useStart').value.trim();
+        let e = document.getElementById('useEnd').value.trim();
         const el = document.getElementById('useQuickCount');
         if (!s || !e) { el.innerText = s || e ? "數量: 請輸入完整首尾碼" : ""; return; }
+        // suffix 類型：先去掉校驗位再展開範圍，確保數量正確（依已選項目或識別結果的 calcType）
+        const suffixN = getCurrentSuffixDigits();
+        if (suffixN > 0) { s = stripSingleCode(s, suffixN); e = stripSingleCode(e, suffixN); }
         const codes = getRangeCodes(s, e);
         el.innerText = codes.length > 0 ? `數量: ${codes.length} 張` : "數量: 0 (範圍無效)";
+    }
+
+    // 取得目前適用的 suffix 位數：優先用已選供應商/項目的 calcType，其次用識別結果的 calcType
+    function getCurrentSuffixDigits() {
+        const supplier = document.getElementById('useSupplierSelect').value;
+        const gift = document.getElementById('useGiftSelect').value;
+        if (supplier && gift) {
+            const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
+            if (match) return getSuffixDigits(match.calcType);
+        }
+        if (window.lastDetectInfo && window.lastDetectInfo.calcType) return getSuffixDigits(window.lastDetectInfo.calcType);
+        return 0;
     }
 
     function setDetectStatus(state, text) {
@@ -626,11 +644,19 @@
         const m = /^suffix_(\d+)$/.exec((calcType || '').toString().trim());
         if (!m) return codes;
         const n = parseInt(m[1], 10);
-        return codes.map(c => {
-            // 若代碼已經是入庫形式（識別時已確認）則不重複去尾
-            if (window.lastDetectInfo && window.lastDetectInfo.matchedCode === c) return c;
-            return c.length > n ? c.substring(0, c.length - n) : c;
-        });
+        return codes.map(c => stripSingleCode(c, n));
+    }
+
+    // 去除單一代碼的尾碼校驗位；若代碼已經是入庫形式（識別時已確認）則不重複去尾
+    function stripSingleCode(c, n) {
+        if (window.lastDetectInfo && window.lastDetectInfo.matchedCode === c) return c;
+        return c.length > n ? c.substring(0, c.length - n) : c;
+    }
+
+    // 取得 calcType 的 suffix 位數（非 suffix 類型回傳 0）
+    function getSuffixDigits(calcType) {
+        const m = /^suffix_(\d+)$/.exec((calcType || '').toString().trim());
+        return m ? parseInt(m[1], 10) : 0;
     }
 
     function applyLocalMatch(supplier, giftName) {
@@ -656,22 +682,28 @@
         
         if (!supplier || !gift) { document.getElementById('previewBox').style.display = 'none'; return; }
         
+        const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
+        if (!match) { document.getElementById('previewBox').style.display = 'none'; return; }
+        const suffixN = getSuffixDigits(match.calcType);
+
         let codes = [];
         if (mode === 'range') {
             const start = document.getElementById('useStart').value.trim();
             const end = document.getElementById('useEnd').value.trim();
             if (!start || !end) { document.getElementById('previewBox').style.display = 'none'; return; }
-            codes = getRangeCodes(start, end);
+            // suffix 類型：先去掉首碼/尾碼的校驗位，再展開範圍（否則數量會錯誤膨脹）
+            const sStripped = suffixN > 0 ? stripSingleCode(start, suffixN) : start;
+            const eStripped = suffixN > 0 ? stripSingleCode(end, suffixN) : end;
+            codes = getRangeCodes(sStripped, eStripped);
         } else {
             codes = document.getElementById('useCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "");
+            // 清單模式：逐筆去尾
+            if (suffixN > 0) codes = stripCodesByCalcType(codes, match.calcType);
         }
         
         if (codes.length === 0) { document.getElementById('previewBox').style.display = 'none'; return; }
         
-        const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
-        if (match) {
-            // suffix 計算類型：掃描條碼比入庫代碼多 N 位校驗碼，需去尾後才能對上 GiftStatus
-            codes = stripCodesByCalcType(codes, match.calcType);
+        {
             document.getElementById('pSup').innerText = match.supplier;
             document.getElementById('pGift').innerText = match.name;
             document.getElementById('pStart').innerText = codes[0] || "";
