@@ -179,12 +179,13 @@
                         <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebounced()"></div>
                     </div>
                     <div id="useListSection" style="display:none;">
-                        <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebounced()"></textarea></div>
+                        <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebounced(); calcTotal('useCodes', 'pCountText')"></textarea></div>
                     </div>
                 </div>
                 <div>
                     <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
                     <div class="form-group"><label>禮券項目</label><select id="useGiftSelect" onchange="useAutoPreview()"><option value="">請選擇</option></select></div>
+                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="useAutoPreview()" style="width:100%; background:var(--primary-blue);">手動重整預覽</button></div>
                 </div>
             </div>
             
@@ -195,7 +196,7 @@
                 <p id="pListDisplay" style="display:none;">模式: 清單出庫</p>
                 <p>有效日期: <span id="pExpiry"></span></p>
                 <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
-                <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong></p>
+                <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong> <span id="pCountText" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
                 <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
                 <div class="form-group" style="margin-top:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                 <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
@@ -402,6 +403,9 @@
     function useSmartDetectListDebounced() {
         clearTimeout(detectTimer);
         detectTimer = setTimeout(() => useSmartDetectList(), 500);
+        // 即時更新數量計數
+        const codes = document.getElementById('useCodes').value.split('\n').filter(c => c.trim() !== "");
+        document.getElementById('pCountText').innerText = "(目前清單: " + codes.length + " 張)";
     }
 
     function useAutoPreviewDebounced() {
@@ -409,30 +413,57 @@
         detectTimer = setTimeout(() => useAutoPreview(), 500);
     }
 
-    async function useSmartDetect() {
+    function useSmartDetect() {
         const s = document.getElementById('useStart').value.trim();
         if (!s) return;
-        await detectSupplierByCode(s);
+        localDetectSupplier(s);
     }
 
-    async function useSmartDetectList() {
+    function useSmartDetectList() {
         const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
         if (codes.length > 0) {
-            await detectSupplierByCode(codes[0]);
+            localDetectSupplier(codes[0]);
         } else {
             document.getElementById('previewBox').style.display = 'none';
         }
     }
 
-    async function detectSupplierByCode(code) {
-        try {
-            const res = await fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`);
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('useSupplierSelect').value = data.supplier;
-                useUpdateGiftSelect(data.giftName); // 傳入預計選取的項目
+    function localDetectSupplier(code) {
+        // V3.5.5 本地即時識別：毫秒級匹配 Config 規則
+        let found = false;
+        for (const config of giftDatabase) {
+            if (code.startsWith(config.rule1)) {
+                // 如果有長度限制 (Rule2 是數字)
+                if (config.rule2 && !isNaN(config.rule2)) {
+                    if (code.length === parseInt(config.rule2)) {
+                        applyLocalMatch(config.supplier, config.name);
+                        found = true; break;
+                    }
+                } else {
+                    applyLocalMatch(config.supplier, config.name);
+                    found = true; break;
+                }
             }
-        } catch (e) {}
+        }
+        // 若本地未匹配，再非同步請求後端備援
+        if (!found) {
+            fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
+                .then(r => r.json()).then(d => { if(d.success) applyLocalMatch(d.supplier, d.giftName); });
+        }
+    }
+
+    function applyLocalMatch(supplier, giftName) {
+        const sSelect = document.getElementById('useSupplierSelect');
+        if (sSelect.value !== supplier) {
+            sSelect.value = supplier;
+            useUpdateGiftSelect(giftName);
+        } else {
+            const gSelect = document.getElementById('useGiftSelect');
+            if (gSelect.value !== giftName) {
+                gSelect.value = giftName;
+                useAutoPreview();
+            }
+        }
     }
 
     function useUpdateGiftSelect(targetGiftName) {
