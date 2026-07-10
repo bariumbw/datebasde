@@ -496,15 +496,21 @@
     async function useConfirmSubmit() {
         const orderNo = document.getElementById('useOrderNo').value;
         if (!orderNo) { alert('請填寫訂單號'); return; }
-        const warningVisible = document.getElementById('usageWarning').style.display === 'block';
-        if (warningVisible && !confirm("偵測到重複代碼，確定要繼續登記嗎？(將記錄在二次欄位)")) return;
+        
+        // 強化重複警示彈窗：強制檢查 UI 狀態
+        const warningBox = document.getElementById('usageWarning');
+        const isDuplicate = warningBox && warningBox.style.display === 'block';
+        
+        if (isDuplicate) {
+            const confirmMsg = "偵測到重複代碼，確定要繼續登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)";
+            if (!confirm(confirmMsg)) return;
+        }
         
         showLoading();
         const codes = window.currentUseCodes;
         const match = window.currentUseMatch;
         try {
-            // 整合請求：一次發送狀態更新與流水帳資訊
-            // V3.5.2 極速版：維持合併請求，後端已優化索引處理
+            // V3.5.3 極速整合版：單一請求完成所有後端更新
             const res = await fetch(API_URL, { 
                 method: "POST", 
                 body: JSON.stringify({ 
