@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>禮券全能管理系統 V3.4.6 - 出庫模式強化版</title>
+    <title>禮券全能管理系統 V3.4.7 - 統計排序修復版</title>
     <style>
     :root {
         --primary-pink: #ffb7c5;
@@ -66,7 +66,7 @@
 
 <div class="container">
     <div id="loginPage" class="page active">
-        <h2>禮券全能管理系統 V3.4.6</h2>
+        <h2>禮券全能管理系統 V3.4.7</h2>
         <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
         <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
         <button onclick="handleLogin()" style="width:100%;">登入系統</button>
@@ -313,12 +313,14 @@
         const stats = await res.json();
         const body = document.getElementById('statsTableBody');
         body.innerHTML = "";
-        for (const [name, data] of Object.entries(stats)) {
+        
+        // stats 現在是陣列，且已經在後端排序過
+        stats.forEach(data => {
             const stock = data.total - data.used;
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${name}</td><td>${data.supplier}</td><td>${data.total}</td><td style="color:var(--success-green); font-weight:bold;">${data.used}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td>`;
+            tr.innerHTML = `<td>${data.giftName}</td><td>${data.supplier}</td><td>${data.total}</td><td style="color:var(--success-green); font-weight:bold;">${data.used}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td>`;
             body.appendChild(tr);
-        }
+        });
         hideLoading();
     }
 
@@ -491,7 +493,6 @@
                     }) 
                 });
                 hideLoading(); showToast("已完成記錄");
-                // 清空資料
                 document.getElementById('useStart').value = ""; 
                 document.getElementById('useEnd').value = ""; 
                 document.getElementById('useCodes').value = "";
