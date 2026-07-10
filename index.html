@@ -521,8 +521,13 @@
         useSmartDetectList();
     }
 
-    // 未識別前先顯示範圍數量
+    // 未識別前先顯示範圍數量（防抖：掃描器高速輸入時不每鍵重算，停止輸入 250ms 後才計算）
+    let quickCountTimer = null;
     function useUpdateRangeCount() {
+        clearTimeout(quickCountTimer);
+        quickCountTimer = setTimeout(useUpdateRangeCountNow, 250);
+    }
+    function useUpdateRangeCountNow() {
         let s = document.getElementById('useStart').value.trim();
         let e = document.getElementById('useEnd').value.trim();
         const el = document.getElementById('useQuickCount');
@@ -530,8 +535,20 @@
         // suffix 類型：先轉換為入庫代碼再展開範圍，確保數量正確（依已選項目或識別結果的 calcType）
         const ct = getCurrentCalcType();
         if (getCalcTransform(ct)) { s = stripSingleCode(s, ct); e = stripSingleCode(e, ct); }
-        const codes = getRangeCodes(s, e);
-        el.innerText = codes.length > 0 ? `數量: ${codes.length} 張` : "數量: 0 (範圍無效)";
+        // 不展開陣列，直接用數值差計算數量（零成本，無卡頓風險）
+        const n = getRangeCount(s, e);
+        if (n === null) { el.innerText = "數量: 請輸入完整首尾碼"; return; }
+        el.innerText = n > 0 ? `數量: ${n} 張` : "數量: 0 (範圍無效)";
+    }
+    // 只計算範圍數量不展開陣列；回傳 null 表示範圍格式無效/未輸入完整
+    function getRangeCount(s, e) {
+        const sm = s.match(/^([A-Za-z]*)(.*)$/); const em = e.match(/^([A-Za-z]*)(.*)$/);
+        if ((sm[1] || "") !== (em[1] || "")) return null;
+        const sn = sm[2] || "", en = em[2] || "";
+        if (!/^\d+$/.test(sn) || !/^\d+$/.test(en)) return null;
+        const sv = parseInt(sn, 10), ev = parseInt(en, 10);
+        if (isNaN(sv) || isNaN(ev) || ev < sv) return 0;
+        return ev - sv + 1;
     }
 
     // 取得目前適用的 calcType：優先用已選供應商/項目的 calcType，其次用識別結果的 calcType
@@ -709,6 +726,9 @@
             // suffix 類型：先將首碼/尾碼轉換為入庫代碼，再展開範圍（否則數量會錯誤膨脹）
             const sStripped = hasTransform ? stripSingleCode(start, match.calcType) : start;
             const eStripped = hasTransform ? stripSingleCode(end, match.calcType) : end;
+            // 安全防護：範圍過大（多半是尾碼尚未輸入完整）時不展開、不送查詢，避免頁面卡死
+            const rc = getRangeCount(sStripped, eStripped);
+            if (rc === null || rc > MAX_RANGE_CODES) { document.getElementById('previewBox').style.display = 'none'; return; }
             codes = getRangeCodes(sStripped, eStripped);
         } else {
             codes = document.getElementById('useCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "");
@@ -732,15 +752,22 @@
             document.getElementById('pUsageStatus').innerHTML = `<span style="color:#e6a700; font-weight:bold;">檢查中...</span>`;
             document.getElementById('usageWarning').style.display = 'none';
             
-            const res = await fetch(`${API_URL}?action=checkUsage&codes=${JSON.stringify(codes)}`);
-            const data = await res.json();
-            if (data.usedCodes && data.usedCodes.length > 0) {
-                document.getElementById('pUsageStatus').innerHTML = `<span style="color:red">偵測到重複代碼 (${data.usedCodes.length} 張)</span>`;
-                document.getElementById('usageWarning').innerHTML = `<strong>警語：代碼 ${data.usedCodes.join(', ')} 已被登記使用過！確認要再登記？</strong>`;
-                document.getElementById('usageWarning').style.display = 'block';
-            } else {
-                document.getElementById('pUsageStatus').innerHTML = `<span style="color:#28a745;">未使用</span>`;
-                document.getElementById('usageWarning').style.display = 'none';
+            try {
+                const res = await fetch(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+                const data = await res.json();
+                // 確認輸入未變才套用結果，避免舊回應覆蓋新輸入
+                if (window.currentUseCodes !== codes) return;
+                if (data.usedCodes && data.usedCodes.length > 0) {
+                    document.getElementById('pUsageStatus').innerHTML = `<span style="color:red">偵測到重複代碼 (${data.usedCodes.length} 張)</span>`;
+                    document.getElementById('usageWarning').innerHTML = `<strong>警語：代碼 ${data.usedCodes.join(', ')} 已被登記使用過！確認要再登記？</strong>`;
+                    document.getElementById('usageWarning').style.display = 'block';
+                } else {
+                    document.getElementById('pUsageStatus').innerHTML = `<span style="color:#28a745;">未使用</span>`;
+                    document.getElementById('usageWarning').style.display = 'none';
+                }
+            } catch (err) {
+                // 網絡錯誤或回應異常：顯示提示而非讓頁面發生未捕獲錯誤
+                document.getElementById('pUsageStatus').innerHTML = `<span style="color:#e6a700;">使用狀態檢查失敗（可重整預覽重試），不影響出庫</span>`;
             }
         }
     }
@@ -1066,7 +1093,24 @@
     }
     function updateGiftMenu() { var s = document.getElementById('supplierSelect').value; var g = document.getElementById('giftSelect'); g.innerHTML = '<option value="">請選擇</option>'; giftDatabase.filter(r => r.supplier === s).forEach(r => { var opt = document.createElement('option'); opt.value = r.name; opt.text = r.name; g.appendChild(opt); }); }
     function calculateExpiryDate(rule) { if (!rule || rule === 'N/A') return 'N/A'; if (rule.includes('m_end')) { const months = parseInt(rule); const date = new Date(); date.setMonth(date.getMonth() + months + 1); date.setDate(0); return date.toISOString().split('T')[0]; } return rule; }
-    function getRangeCodes(start, end) { var sStr = start.toString().trim(); var eStr = end.toString().trim(); if(!sStr || !eStr) return []; var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/); var prefix = sMatch[1] || ""; var sNumStr = sMatch[2] || "0"; var eNumStr = eMatch[2] || "0"; var sVal = parseInt(sNumStr, 10); var eVal = parseInt(eNumStr, 10); var padLen = sNumStr.length; var codes = []; for (var i = sVal; i <= eVal; i++) { codes.push(prefix + i.toString().padStart(padLen, '0')); } return codes; }
+    // 範圍展開安全上限：防止掃描器輸入途中（代碼不完整）時首尾碼差距巨大，展開出百萬級陣列導致頁面卡死
+    const MAX_RANGE_CODES = 10000;
+    function getRangeCodes(start, end) {
+        var sStr = start.toString().trim(); var eStr = end.toString().trim();
+        if(!sStr || !eStr) return [];
+        var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/);
+        var prefix = sMatch[1] || ""; var ePrefix = eMatch[1] || "";
+        if (prefix !== ePrefix) return []; // 前綴不一致，範圍無效
+        var sNumStr = sMatch[2] || ""; var eNumStr = eMatch[2] || "";
+        if (!/^\d+$/.test(sNumStr) || !/^\d+$/.test(eNumStr)) return []; // 非純數字部分，無法展開
+        var sVal = parseInt(sNumStr, 10); var eVal = parseInt(eNumStr, 10);
+        if (isNaN(sVal) || isNaN(eVal) || eVal < sVal) return [];
+        if (eVal - sVal + 1 > MAX_RANGE_CODES) return []; // 超過安全上限（多半是代碼未輸入完整），不展開
+        var padLen = sNumStr.length;
+        var codes = [];
+        for (var i = sVal; i <= eVal; i++) { codes.push(prefix + i.toString().padStart(padLen, '0')); }
+        return codes;
+    }
     function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(c => c.trim() !== "").length; }
     function calcTotalRange(p) { var s = document.getElementById(p + 'Start').value.trim(); var e = document.getElementById(p + 'End').value.trim(); if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; } var sMatch = s.match(/^([A-Za-z]*)(.*)$/); var eMatch = e.match(/^([A-Za-z]*)(.*)$/); var sNum = parseInt(sMatch[2] || "0", 10); var eNum = parseInt(eMatch[2] || "0", 10); var total = (sNum && eNum && eNum >= sNum) ? (eNum - sNum + 1) : 0; document.getElementById(p + 'Total').innerText = "總張數: " + total; }
 </script>
