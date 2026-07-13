@@ -812,6 +812,7 @@
                     mode: 'use', 
                     user: currentUser, 
                     payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
+                    allCodes: codes, // V3.7.1 傳完整代碼清單讓後端拆成連續子範圍寫入 Records
                     recordInfo: {
                         supplier: match.supplier,
                         gift: match.name,
@@ -1114,5 +1115,8 @@
     function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(c => c.trim() !== "").length; }
     function calcTotalRange(p) { var s = document.getElementById(p + 'Start').value.trim(); var e = document.getElementById(p + 'End').value.trim(); if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; } var sMatch = s.match(/^([A-Za-z]*)(.*)$/); var eMatch = e.match(/^([A-Za-z]*)(.*)$/); var sNum = parseInt(sMatch[2] || "0", 10); var eNum = parseInt(eMatch[2] || "0", 10); var total = (sNum && eNum && eNum >= sNum) ? (eNum - sNum + 1) : 0; document.getElementById(p + 'Total').innerText = "總張數: " + total; }
 </script>
+</body>
+</html>
+
 </body>
 </html>
