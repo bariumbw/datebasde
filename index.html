@@ -128,12 +128,12 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>項目名稱</th>
                                 <th>供應商</th>
-                                <th>總入庫</th>
-                                <th>總使用</th>
+                                <th>項目名稱</th>
                                 <th>剩餘庫存</th>
                                 <th>未使用並已啟動</th>
+                                <th>總使用</th>
+                                <th>總入庫</th>
                             </tr>
                         </thead>
                         <tbody id="statsTableBody"></tbody>
@@ -186,9 +186,10 @@
                     <textarea id="actCodes" oninput="calcTotal('actCodes', 'actTotal')"></textarea>
                 </div>
                 <div id="actRange">
-                    <div class="form-group"><label>起始</label><input type="text" id="actStart" oninput="calcTotalRange('act')"></div>
+                    <div class="form-group"><label>起始</label><input type="text" id="actStart" oninput="calcTotalRange('act'); actDetectSupplier();" onkeypress="if(event.keyCode==13){document.getElementById('actEnd').focus();return false;}"></div>
                     <div class="form-group"><label>結束</label><input type="text" id="actEnd" oninput="calcTotalRange('act')"></div>
                 </div>
+                <div id="actDetectStatus" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
                 <h3 id="actTotal">總張數: 0</h3>
                 <button id="actBtn" onclick="activateGift()" style="width:100%; padding: 12px; background: var(--primary-blue);">確認啟用</button>
             </div>
@@ -399,7 +400,7 @@
         stats.forEach(data => {
             const stock = data.total - data.used;
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${data.giftName}</td><td>${data.supplier}</td><td>${data.total}</td><td style="color:var(--success-green); font-weight:bold;">${data.used}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td>`;
+            tr.innerHTML = `<td>${data.supplier}</td><td>${data.giftName}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td><td style="color:var(--success-green); font-weight:bold;">${data.used}</td><td>${data.total}</td>`;
             body.appendChild(tr);
         });
         hideLoading();
@@ -603,6 +604,8 @@
 
     // 元素 ID 輔助函數：n=0 用原始 ID，n>=1 用 _N 後綴
     function useEl(id, n) { return document.getElementById(n === 0 ? id : id + '_' + n); }
+    // 預覽專用計時器（與 detect 分開，避免互相覆蓋）
+    let itemPreviewTimers = [null];
 
     // 新增品項
     function addUseItem() {
@@ -611,6 +614,7 @@
         useItemCount++;
         // 擴展狀態陣列
         itemDetectTimers.push(null);
+        itemPreviewTimers.push(null);
         itemQuickCountTimers.push(null);
         itemBackendDetectTimers.push(null);
         itemLastDetectedCodes.push(null);
@@ -664,6 +668,11 @@
         document.getElementById('useItemsContainer').insertAdjacentHTML('beforeend', html);
         // 更新按鈕狀態
         document.getElementById('addItemBtn').disabled = useItemCount >= MAX_USE_ITEMS;
+        // 自動聚焦到新品項的首碼輸入框
+        setTimeout(() => {
+            const startEl = document.getElementById('useStart_' + n);
+            if (startEl) { startEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); startEl.focus(); }
+        }, 100);
     }
 
     // 移除品項
@@ -673,6 +682,7 @@
         if (block) block.remove();
         // 清除狀態
         itemDetectTimers[n] = null;
+        itemPreviewTimers[n] = null;
         itemQuickCountTimers[n] = null;
         itemBackendDetectTimers[n] = null;
         itemLastDetectedCodes[n] = null;
@@ -773,8 +783,8 @@
     function setDetectStatus(state, text) { setDetectStatusN(0, state, text); }
 
     function useAutoPreviewDebouncedN(n) {
-        clearTimeout(itemDetectTimers[n]);
-        itemDetectTimers[n] = setTimeout(() => useAutoPreviewN(n), 300);
+        clearTimeout(itemPreviewTimers[n]);
+        itemPreviewTimers[n] = setTimeout(() => useAutoPreviewN(n), 300);
     }
     function useAutoPreviewDebounced() { useAutoPreviewDebouncedN(0); }
 
@@ -1305,12 +1315,53 @@
         } catch (err) { alert("登記失敗: " + err.message); hideLoading(); }
     }
 
+    // 啟用頁面偵測供應商/項目
+    let actDetectTimer = null;
+    function actDetectSupplier() {
+        clearTimeout(actDetectTimer);
+        const code = document.getElementById('actStart').value.trim();
+        const statusEl = document.getElementById('actDetectStatus');
+        if (!code) { if (statusEl) statusEl.innerText = ''; return; }
+        if (detectCache[code] !== undefined) {
+            const d = detectCache[code];
+            if (d && d.success) {
+                if (statusEl) { statusEl.style.color = '#28a745'; statusEl.innerText = `\u2713 \u5df2\u8b58\u5225: ${d.supplier} / ${d.giftName}`; }
+            } else {
+                if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '\u2717 \u6c92\u627e\u5230\u5c0d\u61c9\u7684\u4f9b\u61c9\u5546/\u9805\u76ee'; }
+            }
+            return;
+        }
+        if (statusEl) { statusEl.style.color = '#ff9500'; statusEl.innerText = '\u23f3 \u8b58\u5225\u4e2d...'; }
+        actDetectTimer = setTimeout(() => {
+            fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
+                .then(r => r.json()).then(d => {
+                    detectCache[code] = d;
+                    if (document.getElementById('actStart').value.trim() !== code) return;
+                    if (d && d.success) {
+                        if (statusEl) { statusEl.style.color = '#28a745'; statusEl.innerText = `\u2713 \u5df2\u8b58\u5225: ${d.supplier} / ${d.giftName}`; }
+                    } else {
+                        if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '\u2717 \u6c92\u627e\u5230\u5c0d\u61c9\u7684\u4f9b\u61c9\u5546/\u9805\u76ee'; }
+                    }
+                }).catch(() => {
+                    if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '\u2717 \u8b58\u5225\u67e5\u8a62\u5931\u6557'; }
+                });
+        }, 400);
+    }
+
     async function activateGift() {
         var m = document.getElementById('actMode').value;
         var codes = (m === 'list') ? document.getElementById('actCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "") : getRangeCodes(document.getElementById('actStart').value.trim(), document.getElementById('actEnd').value.trim());
+        if (codes.length === 0) { alert('\u8acb\u8f38\u5165\u4ee3\u78bc'); return; }
         showLoading();
         await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activate', payload: codes }) });
-        hideLoading(); showToast(); loadStats();
+        hideLoading(); showToast("\u555f\u7528\u5b8c\u6210");
+        // \u6e05\u7a7a\u9801\u9762
+        document.getElementById('actStart').value = '';
+        document.getElementById('actEnd').value = '';
+        document.getElementById('actCodes').value = '';
+        document.getElementById('actTotal').innerText = '\u7e3d\u5f35\u6578: 0';
+        document.getElementById('actDetectStatus').innerText = '';
+        loadStats();
     }
 
     async function activateRange(start, end, idx) {
