@@ -78,6 +78,14 @@
     .clear-btn:hover { background: #d0d0d0; }
     .status-count { display: inline-block; background: var(--dark-pink); color: white; padding: 2px 6px; border-radius: 12px; font-size: 10px; font-weight: bold; }
 
+    /* 多品項出庫樣式 */
+    .use-item-block { border: 1px solid var(--border-color); border-radius: 10px; padding: 18px 15px 15px; margin-bottom: 15px; position: relative; background: #fff; }
+    .use-item-block .item-label { position: absolute; top: -10px; left: 12px; background: var(--dark-pink); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+    .use-item-remove { position: absolute; top: 8px; right: 8px; background: var(--danger-red); color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 14px; cursor: pointer; line-height: 22px; text-align: center; padding: 0; }
+    .use-item-remove:hover { background: #cc0000; }
+    #addItemBtn { width: 100%; padding: 10px; background: #f0f7ff; border: 2px dashed var(--primary-blue); color: var(--primary-blue); border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 15px; }
+    #addItemBtn:hover { background: #e0efff; }
+    #addItemBtn:disabled { border-color: #ccc; color: #999; background: #f9f9f9; cursor: not-allowed; }
 
     </style>
 </head>
@@ -188,43 +196,49 @@
             <!-- 禮券使用 -->
             <div id="usePage" class="page">
                 <h2>禮券使用 (出庫)</h2>
-                <div class="reg-grid">
-                    <div>
-                        <div class="form-group">
-                            <label>輸入模式</label>
-                            <select id="useMode" onchange="toggleUseMode(this.value)">
-                                <option value="range" selected>範圍輸入</option>
-                                <option value="list">清單輸入</option>
-                            </select>
+                <div id="useItemsContainer">
+                    <!-- 品項 #1 (原始品項，ID 無後綴) -->
+                    <div class="use-item-block" data-item-index="0">
+                        <span class="item-label">品項 1</span>
+                        <div class="reg-grid">
+                            <div>
+                                <div class="form-group">
+                                    <label>輸入模式</label>
+                                    <select id="useMode" onchange="toggleUseModeN(0, this.value)">
+                                        <option value="range" selected>範圍輸入</option>
+                                        <option value="list">清單輸入</option>
+                                    </select>
+                                </div>
+                                <div id="useRangeSection">
+                                    <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetectDebouncedN(0); useUpdateRangeCountN(0);" onkeypress="if(event.keyCode==13){useEl('useEnd',0).focus();return false;}"></div>
+                                    <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebouncedN(0); useUpdateRangeCountN(0);"></div>
+                                </div>
+                                <div id="useListSection" style="display:none;">
+                                    <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebouncedN(0);"></textarea></div>
+                                </div>
+                                <div id="detectStatus" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
+                                <div id="useQuickCount" style="font-size:14px; font-weight:bold; margin-top:5px; color:var(--primary-blue);"></div>
+                            </div>
+                            <div>
+                                <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelectN(0)"><option value="">請選擇</option></select></div>
+                                <div class="form-group"><label>禮券項目</label><select id="useGiftSelect" onchange="useAutoPreviewN(0)"><option value="">請選擇</option></select></div>
+                                <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="useAutoPreviewN(0)" style="width:100%; background:var(--primary-blue);">手動重整預覽</button></div>
+                            </div>
                         </div>
-                        <div id="useRangeSection">
-                            <div class="form-group"><label>首碼</label><input type="text" id="useStart" oninput="useSmartDetectDebounced(); useUpdateRangeCount();" onkeypress="if(event.keyCode==13){document.getElementById('useEnd').focus();return false;}"></div>
-                            <div class="form-group"><label>尾碼</label><input type="text" id="useEnd" oninput="useAutoPreviewDebounced(); useUpdateRangeCount();"></div>
+                        <div id="previewBox" style="display:none;">
+                            <p><strong>預覽資訊</strong></p>
+                            <p>供應商: <span id="pSup"></span> | 項目: <span id="pGift"></span></p>
+                            <p id="pRangeDisplay">範圍: <span id="pStart"></span> ~ <span id="pEnd"></span></p>
+                            <p id="pListDisplay" style="display:none;">模式: 清單出庫</p>
+                            <p>有效日期: <span id="pExpiry"></span></p>
+                            <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
+                            <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong> <span id="pCountText" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
+                            <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
                         </div>
-                        <div id="useListSection" style="display:none;">
-                            <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes" oninput="useSmartDetectListDebounced(); calcTotal('useCodes', 'pCountText')"></textarea></div>
-                        </div>
-                        <div id="detectStatus" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
-                        <div id="useQuickCount" style="font-size:14px; font-weight:bold; margin-top:5px; color:var(--primary-blue);"></div>
-                    </div>
-                    <div>
-                        <div class="form-group"><label>供應商</label><select id="useSupplierSelect" onchange="useUpdateGiftSelect()"><option value="">請選擇</option></select></div>
-                        <div class="form-group"><label>禮券項目</label><select id="useGiftSelect" onchange="useAutoPreview()"><option value="">請選擇</option></select></div>
-                        <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="useAutoPreview()" style="width:100%; background:var(--primary-blue);">手動重整預覽</button></div>
                     </div>
                 </div>
-                
-                <div id="previewBox">
-                    <p><strong>預覽資訊</strong></p>
-                    <p>供應商: <span id="pSup"></span> | 項目: <span id="pGift"></span></p>
-                    <p id="pRangeDisplay">範圍: <span id="pStart"></span> ~ <span id="pEnd"></span></p>
-                    <p id="pListDisplay" style="display:none;">模式: 清單出庫</p>
-                    <p>有效日期: <span id="pExpiry"></span></p>
-                    <p>使用狀態: <span id="pUsageStatus">讀取中...</span></p>
-                    <p>系統計算數量: <strong id="pCount" style="color:red; font-size:18px;"></strong> <span id="pCountText" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
-                    <div id="usageWarning" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
-                </div>
-                <!-- 訂單號與確認按鈕獨立於預覽資訊之外，永遠顯示 -->
+                <button id="addItemBtn" onclick="addUseItem()">＋ 新增品項</button>
+                <!-- 訂單號與確認按鈕獨立於品項之外，永遠顯示 -->
                 <div style="margin-top:15px;">
                     <div class="form-group"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                     <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
@@ -240,13 +254,17 @@
                     <button id="tab-reg" class="tab-btn" onclick="filterRecordsByType('登記')">登記</button>
                 </div>
                 <div class="filter-bar">
+                    <select id="filterSupplier" onchange="renderRecords(true)">
+                        <option value="">全部供應商</option>
+                    </select>
                     <input type="text" id="filterUser" placeholder="篩選人員" oninput="renderRecords(true)">
                     <input type="text" id="filterOrder" placeholder="篩選訂單號" oninput="renderRecords(true)">
                     <input type="date" id="filterDate" onchange="renderRecords(true)">
                     <select id="filterActStatus" onchange="renderRecords(true)">
                         <option value="">全部狀態</option>
-                        <option value="unact">未啟動</option>
                         <option value="act">已啟動</option>
+                        <option value="unact">未啟動/部分未啟動</option>
+                        <option value="noreg">查無入庫記錄</option>
                     </select>
                     <button onclick="loadRecords()" style="font-size:12px;">刷新</button>
                 </div>
@@ -303,7 +321,6 @@
     
     let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
     let recordsCache = [], currentTypeFilter = "";
-    let detectTimer = null;
 
     // 出庫處理狀態管理
     let processingStatuses = {
@@ -388,11 +405,60 @@
         hideLoading();
     }
 
+    const actStatusCache = {}; // index -> 'act'|'unact'|'part'|'noreg'
+
     async function loadRecords() {
         showLoading();
         const res = await fetch(`${API_URL}?action=getRecords`);
         recordsCache = await res.json();
+        // 動態填入供應商篩選下拉選單
+        populateSupplierFilter();
         renderRecords();
+        // 背景預載所有記錄的啟動狀態（不阻止頁面操作）
+        preloadActivationStatuses();
+    }
+
+    async function preloadActivationStatuses() {
+        const BATCH = 5; // 同時查詢 5 筆
+        for (let i = 0; i < recordsCache.length; i += BATCH) {
+            const batch = [];
+            for (let j = i; j < Math.min(i + BATCH, recordsCache.length); j++) {
+                const r = recordsCache[j];
+                if (r[9] === '已登記刪除') { actStatusCache[j] = 'del'; continue; }
+                batch.push(fetchActStatus(r[3], r[4], j));
+            }
+            await Promise.all(batch);
+        }
+        // 全部查詢完成後重新渲染（如果有啟動狀態篩選活動中）
+        const fAct = document.getElementById('filterActStatus').value;
+        if (fAct) renderRecords();
+    }
+
+    async function fetchActStatus(start, end, idx) {
+        try {
+            const res = await fetch(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+            const data = await res.json();
+            const unactCount = data.unactivatedCodes.length;
+            const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null;
+            if (total === 0) { actStatusCache[idx] = 'noreg'; }
+            else if (unactCount === 0) { actStatusCache[idx] = 'act'; }
+            else if (total !== null && unactCount >= total) { actStatusCache[idx] = 'unact'; }
+            else { actStatusCache[idx] = 'part'; }
+        } catch (e) { actStatusCache[idx] = 'unknown'; }
+    }
+
+    function populateSupplierFilter() {
+        const sel = document.getElementById('filterSupplier');
+        const current = sel.value;
+        const suppliers = [...new Set(recordsCache.map(r => r[1]).filter(s => s))];
+        suppliers.sort();
+        sel.innerHTML = '<option value="">全部供應商</option>';
+        suppliers.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s; opt.textContent = s;
+            sel.appendChild(opt);
+        });
+        sel.value = current; // 保持之前的選擇
     }
 
     function filterRecordsByType(type) {
@@ -414,6 +480,7 @@
 
     function renderRecords(resetPage = false) {
         if (resetPage) recordsCurrentPage = 1;
+        const fSupplier = document.getElementById('filterSupplier').value;
         const fUser = document.getElementById('filterUser').value.toLowerCase();
         const fOrder = document.getElementById('filterOrder').value.toLowerCase();
         const fDate = document.getElementById('filterDate').value;
@@ -423,10 +490,21 @@
             const r = item.data;
             const type = r[10] || "使用";
             const matchType = !currentTypeFilter || type === currentTypeFilter;
+            const matchSupplier = !fSupplier || r[1] === fSupplier;
             const matchUser = r[6].toLowerCase().includes(fUser);
             const matchOrder = String(r[7]).toLowerCase().includes(fOrder);
             const matchDate = !fDate || new Date(r[0]).toISOString().split('T')[0] === fDate;
-            return matchType && matchUser && matchOrder && matchDate;
+            // 啟動狀態篩選（依賴快取）
+            const idx = item.oriIndex;
+            let matchAct = true;
+            if (fAct && actStatusCache[idx] !== undefined) {
+                if (fAct === 'act') matchAct = actStatusCache[idx] === 'act';
+                else if (fAct === 'unact') matchAct = actStatusCache[idx] === 'unact' || actStatusCache[idx] === 'part';
+                else if (fAct === 'noreg') matchAct = actStatusCache[idx] === 'noreg';
+            } else if (fAct && actStatusCache[idx] === undefined) {
+                matchAct = false; // 尚未查詢到的記錄暂不顯示
+            }
+            return matchType && matchSupplier && matchUser && matchOrder && matchDate && matchAct;
         });
         filtered.sort((a, b) => sortDesc ? new Date(b.data[0]) - new Date(a.data[0]) : new Date(a.data[0]) - new Date(b.data[0]));
 
@@ -448,7 +526,7 @@
             tr.id = `row-${idx}`;
             tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td id="act-status-${idx}">讀取中...</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
             body.appendChild(tr);
-            if (!isDel) checkActivationStatus(r[3], r[4], idx, fAct);
+            if (!isDel) checkActivationStatus(r[3], r[4], idx);
             else document.getElementById(`act-status-${idx}`).innerText = "-";
         }
         renderRecordsPager(totalPages, filtered.length);
@@ -481,180 +559,312 @@
     }
 
     async function checkActivationStatus(start, end, idx, filter) {
-        const res = await fetch(`${API_URL}?action=checkActivation&start=${start}&end=${end}`);
-        const data = await res.json();
-        const container = document.getElementById(`act-status-${idx}`);
-        if (!container) return;
-        const unactCount = data.unactivatedCodes.length;
-        const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null; // 舊後端無此欄位時為 null
-        // V3.6.4 修正：範圍內查無任何入庫代碼時，不能誤判為「已啟動」
-        if (total === 0) {
-            if (filter === "act" || filter === "unact") { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
-            container.innerHTML = `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼，可能是代碼格式不一致或尚未入庫">查無入庫記錄</span>`;
-            return;
+        try {
+            const res = await fetch(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+            const data = await res.json();
+            const container = document.getElementById(`act-status-${idx}`);
+            if (!container) return;
+            const unactCount = data.unactivatedCodes.length;
+            const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null;
+            // 範圍內查無任何入庫代碼
+            if (total === 0) {
+                actStatusCache[idx] = 'noreg';
+                container.innerHTML = `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼">查無入庫記錄</span>`;
+                return;
+            }
+            const isAllAct = unactCount === 0;
+            if (isAllAct) {
+                actStatusCache[idx] = 'act';
+                container.innerHTML = `<span class="status-badge status-act">已啟動</span>`;
+            } else if (total !== null && unactCount >= total) {
+                actStatusCache[idx] = 'unact';
+                container.innerHTML = `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+            } else {
+                actStatusCache[idx] = 'part';
+                container.innerHTML = `<span class="status-badge status-part">部分未啟動${total !== null ? ` (${unactCount}/${total})` : ''}</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+            }
+        } catch (err) {
+            const container = document.getElementById(`act-status-${idx}`);
+            if (container) container.innerHTML = `<span style="color:#999;">查詢失敗</span>`;
         }
-        const isAllAct = unactCount === 0;
-        if (filter === "unact" && isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
-        if (filter === "act" && !isAllAct) { document.getElementById(`row-${idx}`).style.display = 'none'; return; }
-        if (isAllAct) {
-            container.innerHTML = `<span class="status-badge status-act">已啟動</span>`;
-        } else if (total !== null && unactCount >= total) {
-            // 全部未啟動
-            container.innerHTML = `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-        } else {
-            // 部分未啟動：列出未啟動代碼
-            container.innerHTML = `<span class="status-badge status-part">部分未啟動${total !== null ? ` (${unactCount}/${total})` : ''}</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+    }
+
+    // ===== 多品項出庫系統 (Multi-Item Use) =====
+    const MAX_USE_ITEMS = 10;
+    let useItemCount = 1; // 目前品項數量
+    // 每個品項的狀態陣列
+    let itemDetectTimers = [null];
+    let itemQuickCountTimers = [null];
+    let itemBackendDetectTimers = [null];
+    let itemLastDetectedCodes = [null];
+    let itemLastDetectInfos = [null];
+    let itemCurrentUseCodes = [null];
+    let itemCurrentUseMatches = [null];
+
+    // 元素 ID 輔助函數：n=0 用原始 ID，n>=1 用 _N 後綴
+    function useEl(id, n) { return document.getElementById(n === 0 ? id : id + '_' + n); }
+
+    // 新增品項
+    function addUseItem() {
+        if (useItemCount >= MAX_USE_ITEMS) return;
+        const n = useItemCount;
+        useItemCount++;
+        // 擴展狀態陣列
+        itemDetectTimers.push(null);
+        itemQuickCountTimers.push(null);
+        itemBackendDetectTimers.push(null);
+        itemLastDetectedCodes.push(null);
+        itemLastDetectInfos.push(null);
+        itemCurrentUseCodes.push(null);
+        itemCurrentUseMatches.push(null);
+
+        const suppliers = [...new Set(giftDatabase.map(i => i.supplier))];
+        const supplierOpts = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+
+        const html = `
+        <div class="use-item-block" data-item-index="${n}">
+            <span class="item-label">品項 ${n + 1}</span>
+            <button class="use-item-remove" onclick="removeUseItem(${n})" title="移除此品項">&times;</button>
+            <div class="reg-grid">
+                <div>
+                    <div class="form-group">
+                        <label>輸入模式</label>
+                        <select id="useMode_${n}" onchange="toggleUseModeN(${n}, this.value)">
+                            <option value="range" selected>範圍輸入</option>
+                            <option value="list">清單輸入</option>
+                        </select>
+                    </div>
+                    <div id="useRangeSection_${n}">
+                        <div class="form-group"><label>首碼</label><input type="text" id="useStart_${n}" oninput="useSmartDetectDebouncedN(${n}); useUpdateRangeCountN(${n});" onkeypress="if(event.keyCode==13){useEl('useEnd',${n}).focus();return false;}"></div>
+                        <div class="form-group"><label>尾碼</label><input type="text" id="useEnd_${n}" oninput="useAutoPreviewDebouncedN(${n}); useUpdateRangeCountN(${n});"></div>
+                    </div>
+                    <div id="useListSection_${n}" style="display:none;">
+                        <div class="form-group"><label>Code 清單 (每行一個代碼)</label><textarea id="useCodes_${n}" oninput="useSmartDetectListDebouncedN(${n});"></textarea></div>
+                    </div>
+                    <div id="detectStatus_${n}" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
+                    <div id="useQuickCount_${n}" style="font-size:14px; font-weight:bold; margin-top:5px; color:var(--primary-blue);"></div>
+                </div>
+                <div>
+                    <div class="form-group"><label>供應商</label><select id="useSupplierSelect_${n}" onchange="useUpdateGiftSelectN(${n})">${supplierOpts}</select></div>
+                    <div class="form-group"><label>禮券項目</label><select id="useGiftSelect_${n}" onchange="useAutoPreviewN(${n})"><option value="">請選擇</option></select></div>
+                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="useAutoPreviewN(${n})" style="width:100%; background:var(--primary-blue);">手動重整預覽</button></div>
+                </div>
+            </div>
+            <div id="previewBox_${n}" style="display:none; background:#f0f7ff; padding:15px; border-radius:10px; margin-top:15px; border:1px solid #cce5ff;">
+                <p><strong>預覽資訊</strong></p>
+                <p>供應商: <span id="pSup_${n}"></span> | 項目: <span id="pGift_${n}"></span></p>
+                <p id="pRangeDisplay_${n}">範圍: <span id="pStart_${n}"></span> ~ <span id="pEnd_${n}"></span></p>
+                <p id="pListDisplay_${n}" style="display:none;">模式: 清單出庫</p>
+                <p>有效日期: <span id="pExpiry_${n}"></span></p>
+                <p>使用狀態: <span id="pUsageStatus_${n}">讀取中...</span></p>
+                <p>系統計算數量: <strong id="pCount_${n}" style="color:red; font-size:18px;"></strong> <span id="pCountText_${n}" style="font-size:12px; color:#666; margin-left:10px;"></span></p>
+                <div id="usageWarning_${n}" class="usage-warning">警語：範圍內有代碼已被登記使用過！確認要再登記？</div>
+            </div>
+        </div>`;
+        document.getElementById('useItemsContainer').insertAdjacentHTML('beforeend', html);
+        // 更新按鈕狀態
+        document.getElementById('addItemBtn').disabled = useItemCount >= MAX_USE_ITEMS;
+    }
+
+    // 移除品項
+    function removeUseItem(n) {
+        const container = document.getElementById('useItemsContainer');
+        const block = container.querySelector(`[data-item-index="${n}"]`);
+        if (block) block.remove();
+        // 清除狀態
+        itemDetectTimers[n] = null;
+        itemQuickCountTimers[n] = null;
+        itemBackendDetectTimers[n] = null;
+        itemLastDetectedCodes[n] = null;
+        itemLastDetectInfos[n] = null;
+        itemCurrentUseCodes[n] = null;
+        itemCurrentUseMatches[n] = null;
+        document.getElementById('addItemBtn').disabled = false;
+    }
+
+    // 取得目前所有活躍品項索引
+    function getActiveItemIndices() {
+        const blocks = document.getElementById('useItemsContainer').querySelectorAll('.use-item-block');
+        return Array.from(blocks).map(b => parseInt(b.getAttribute('data-item-index')));
+    }
+
+    // ===== 品項索引化的各功能函數 =====
+
+    function toggleUseModeN(n, m) {
+        const rangeEl = useEl('useRangeSection', n);
+        const listEl = useEl('useListSection', n);
+        const pRange = useEl('pRangeDisplay', n);
+        const pList = useEl('pListDisplay', n);
+        if (rangeEl) rangeEl.style.display = (m === 'range') ? 'block' : 'none';
+        if (listEl) listEl.style.display = (m === 'list') ? 'block' : 'none';
+        if (pRange) pRange.style.display = (m === 'range') ? 'block' : 'none';
+        if (pList) pList.style.display = (m === 'list') ? 'block' : 'none';
+        useAutoPreviewN(n);
+    }
+
+    function useSmartDetectDebouncedN(n) {
+        useSmartDetectN(n);
+    }
+
+    function useSmartDetectListDebouncedN(n) {
+        const codesEl = useEl('useCodes', n);
+        const countTextEl = useEl('pCountText', n);
+        const quickCountEl = useEl('useQuickCount', n);
+        if (codesEl) {
+            const codes = codesEl.value.split('\n').filter(c => c.trim() !== "");
+            if (countTextEl) countTextEl.innerText = "(目前清單: " + codes.length + " 張)";
+            if (quickCountEl) quickCountEl.innerText = codes.length > 0 ? `數量: ${codes.length} 張` : "";
         }
+        useSmartDetectListN(n);
     }
 
-    function useSmartDetectDebounced() {
-        // 識別立即執行
-        useSmartDetect();
+    function useUpdateRangeCountN(n) {
+        clearTimeout(itemQuickCountTimers[n]);
+        itemQuickCountTimers[n] = setTimeout(() => useUpdateRangeCountNowN(n), 250);
     }
 
-    function useSmartDetectListDebounced() {
-        // 即時更新數量計數
-        const codes = document.getElementById('useCodes').value.split('\n').filter(c => c.trim() !== "");
-        document.getElementById('pCountText').innerText = "(目前清單: " + codes.length + " 張)";
-        document.getElementById('useQuickCount').innerText = codes.length > 0 ? `數量: ${codes.length} 張` : "";
-        // 識別立即執行
-        useSmartDetectList();
-    }
-
-    // 未識別前先顯示範圍數量（防抖：掃描器高速輸入時不每鍵重算，停止輸入 250ms 後才計算）
-    let quickCountTimer = null;
-    function useUpdateRangeCount() {
-        clearTimeout(quickCountTimer);
-        quickCountTimer = setTimeout(useUpdateRangeCountNow, 250);
-    }
-    function useUpdateRangeCountNow() {
-        let s = document.getElementById('useStart').value.trim();
-        let e = document.getElementById('useEnd').value.trim();
-        const el = document.getElementById('useQuickCount');
+    function useUpdateRangeCountNowN(n) {
+        let s = (useEl('useStart', n) || {}).value || '';
+        let e = (useEl('useEnd', n) || {}).value || '';
+        s = s.trim(); e = e.trim();
+        const el = useEl('useQuickCount', n);
+        if (!el) return;
         if (!s || !e) { el.innerText = s || e ? "數量: 請輸入完整首尾碼" : ""; return; }
-        // suffix 類型：先轉換為入庫代碼再展開範圍，確保數量正確（依已選項目或識別結果的 calcType）
-        const ct = getCurrentCalcType();
+        const ct = getCurrentCalcTypeN(n);
         if (getCalcTransform(ct)) { s = stripSingleCode(s, ct); e = stripSingleCode(e, ct); }
-        // 不展開陣列，直接用數值差計算數量（零成本，無卡頓風險）
-        const n = getRangeCount(s, e);
-        if (n === null) { el.innerText = "數量: 請輸入完整首尾碼"; return; }
-        el.innerText = n > 0 ? `數量: ${n} 張` : "數量: 0 (範圍無效)";
+        const count = getRangeCount(s, e);
+        if (count === null) { el.innerText = "數量: 請輸入完整首尾碼"; return; }
+        el.innerText = count > 0 ? `數量: ${count} 張` : "數量: 0 (範圍無效)";
     }
-    // 只計算範圍數量不展開陣列；回傳 null 表示範圍格式無效/未輸入完整
+
     function getRangeCount(s, e) {
-        const sm = s.match(/^([A-Za-z]*)(.*)$/); const em = e.match(/^([A-Za-z]*)(.*)$/);
+        const sm = s.match(/^([A-Za-z]*)(.*)$/); const em = e.match(/^([A-Za-z]*)(.*)$/); 
         if ((sm[1] || "") !== (em[1] || "")) return null;
         const sn = sm[2] || "", en = em[2] || "";
         if (!/^\d+$/.test(sn) || !/^\d+$/.test(en)) return null;
-        const sv = parseInt(sn, 10), ev = parseInt(en, 10);
-        if (isNaN(sv) || isNaN(ev) || ev < sv) return 0;
+        let sv = parseInt(sn, 10), ev = parseInt(en, 10);
+        if (isNaN(sv) || isNaN(ev)) return null;
+        if (sv > ev) { const tmp = sv; sv = ev; ev = tmp; }
         return ev - sv + 1;
     }
 
-    // 取得目前適用的 calcType：優先用已選供應商/項目的 calcType，其次用識別結果的 calcType
-    function getCurrentCalcType() {
-        const supplier = document.getElementById('useSupplierSelect').value;
-        const gift = document.getElementById('useGiftSelect').value;
+    function getCurrentCalcTypeN(n) {
+        const supplier = (useEl('useSupplierSelect', n) || {}).value || '';
+        const gift = (useEl('useGiftSelect', n) || {}).value || '';
         if (supplier && gift) {
             const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
             if (match) return match.calcType || '';
         }
-        if (window.lastDetectInfo && window.lastDetectInfo.calcType) return window.lastDetectInfo.calcType;
+        if (itemLastDetectInfos[n] && itemLastDetectInfos[n].calcType) return itemLastDetectInfos[n].calcType;
         return '';
     }
 
-    function setDetectStatus(state, text) {
-        const el = document.getElementById('detectStatus');
+    // 向後相容的单品項版本（給其他未修改的代碼調用）
+    function getCurrentCalcType() { return getCurrentCalcTypeN(0); }
+
+    function setDetectStatusN(n, state, text) {
+        const el = useEl('detectStatus', n);
         if (!el) return;
         if (state === 'detecting') { el.style.color = '#ff9500'; el.innerText = text || '⏳ 識別中...'; }
         else if (state === 'found') { el.style.color = '#28a745'; el.innerText = text || '✓ 已識別'; }
         else if (state === 'notfound') { el.style.color = '#ff3b30'; el.innerText = text || '✗ 沒找到對應的供應商/項目（請確認代碼已入庫，或手動選擇）'; }
         else { el.innerText = ''; }
     }
+    function setDetectStatus(state, text) { setDetectStatusN(0, state, text); }
 
-    function useAutoPreviewDebounced() {
-        clearTimeout(detectTimer);
-        detectTimer = setTimeout(() => useAutoPreview(), 300);
+    function useAutoPreviewDebouncedN(n) {
+        clearTimeout(itemDetectTimers[n]);
+        itemDetectTimers[n] = setTimeout(() => useAutoPreviewN(n), 300);
     }
+    function useAutoPreviewDebounced() { useAutoPreviewDebouncedN(0); }
 
-    function useSmartDetect() {
-        const s = document.getElementById('useStart').value.trim();
-        if (!s) { setDetectStatus('clear'); return; }
-        localDetectSupplier(s);
+    function useSmartDetectN(n) {
+        const s = (useEl('useStart', n) || {}).value || '';
+        if (!s.trim()) { setDetectStatusN(n, 'clear'); return; }
+        localDetectSupplierN(n, s.trim());
     }
+    function useSmartDetect() { useSmartDetectN(0); }
 
-    function useSmartDetectList() {
-        const codes = document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "");
+    function useSmartDetectListN(n) {
+        const codesEl = useEl('useCodes', n);
+        const codes = codesEl ? codesEl.value.split('\n').map(c => c.trim()).filter(c => c !== "") : [];
         if (codes.length > 0) {
-            localDetectSupplier(codes[0]);
+            localDetectSupplierN(n, codes[0]);
         } else {
-            setDetectStatus('clear');
-            document.getElementById('previewBox').style.display = 'none';
+            setDetectStatusN(n, 'clear');
+            const pb = useEl('previewBox', n);
+            if (pb) pb.style.display = 'none';
         }
     }
+    function useSmartDetectList() { useSmartDetectListN(0); }
 
-    let backendDetectTimer = null;
     const detectCache = {}; // 識別結果快取：同一代碼不重複查詢後端
 
-    function getCurrentInputCode() {
-        return document.getElementById('useMode').value === 'range'
-            ? document.getElementById('useStart').value.trim()
-            : (document.getElementById('useCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "")[0] || "");
+    function getCurrentInputCodeN(n) {
+        const modeEl = useEl('useMode', n);
+        const mode = modeEl ? modeEl.value : 'range';
+        if (mode === 'range') return (useEl('useStart', n) || {}).value ? useEl('useStart', n).value.trim() : '';
+        const codesEl = useEl('useCodes', n);
+        return codesEl ? (codesEl.value.split('\n').map(c => c.trim()).filter(c => c !== "")[0] || "") : '';
     }
+    function getCurrentInputCode() { return getCurrentInputCodeN(0); }
 
-    let lastDetectedCode = null; // 上次成功識別的代碼
+    let lastDetectedCode = null; // 向後相容
 
-    function localDetectSupplier(code) {
-        // V3.6.0 識別以 GiftStatus 實際入庫資料為準（透過後端 detectInfoByCode 查詢 GiftStatus 總表）
-        clearTimeout(backendDetectTimer);
+    function localDetectSupplierN(n, code) {
+        clearTimeout(itemBackendDetectTimers[n]);
 
-        // 首碼更改了：先清空舊的供應商/項目選擇，強制重新識別
-        if (lastDetectedCode !== null && code !== lastDetectedCode) {
-            lastDetectedCode = null;
-            window.lastDetectInfo = null;
-            document.getElementById('useSupplierSelect').value = "";
-            document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
-            document.getElementById('previewBox').style.display = 'none';
+        if (itemLastDetectedCodes[n] !== null && code !== itemLastDetectedCodes[n]) {
+            itemLastDetectedCodes[n] = null;
+            itemLastDetectInfos[n] = null;
+            const supEl = useEl('useSupplierSelect', n);
+            const giftEl = useEl('useGiftSelect', n);
+            if (supEl) supEl.value = "";
+            if (giftEl) giftEl.innerHTML = '<option value="">請選擇</option>';
+            const pb = useEl('previewBox', n);
+            if (pb) pb.style.display = 'none';
         }
 
-        // 1) 快取命中：立即套用（毫秒級）
         if (detectCache[code] !== undefined) {
             const d = detectCache[code];
             if (d && d.success) {
-                lastDetectedCode = code;
-                window.lastDetectInfo = d;
-                setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : ''));
-                applyLocalMatch(d.supplier, d.giftName);
+                itemLastDetectedCodes[n] = code;
+                itemLastDetectInfos[n] = d;
+                if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = d; }
+                setDetectStatusN(n, 'found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : ''));
+                applyLocalMatchN(n, d.supplier, d.giftName);
             } else {
-                window.lastDetectInfo = null;
-                setDetectStatus('notfound');
+                itemLastDetectInfos[n] = null;
+                if (n === 0) window.lastDetectInfo = null;
+                setDetectStatusN(n, 'notfound');
             }
             return;
         }
 
-        // 2) 未命中：顯示識別中，稍候 400ms（等輸入/掃碼完成）後查詢 GiftStatus
-        setDetectStatus('detecting');
-        backendDetectTimer = setTimeout(() => {
+        setDetectStatusN(n, 'detecting');
+        itemBackendDetectTimers[n] = setTimeout(() => {
             fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
                 .then(r => r.json()).then(d => {
-                    detectCache[code] = d; // 快取結果（含未找到，避免重複查詢）
-                    // 確認首碼未變才套用，避免舊回應覆蓋新輸入
-                    if (getCurrentInputCode() !== code) return;
+                    detectCache[code] = d;
+                    if (getCurrentInputCodeN(n) !== code) return;
                     if (d && d.success) {
-                        lastDetectedCode = code;
-                        window.lastDetectInfo = d;
-                        setDetectStatus('found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : ''));
-                        applyLocalMatch(d.supplier, d.giftName);
+                        itemLastDetectedCodes[n] = code;
+                        itemLastDetectInfos[n] = d;
+                        if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = d; }
+                        setDetectStatusN(n, 'found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : ''));
+                        applyLocalMatchN(n, d.supplier, d.giftName);
                     } else {
-                        window.lastDetectInfo = null;
-                        setDetectStatus('notfound');
+                        itemLastDetectInfos[n] = null;
+                        if (n === 0) window.lastDetectInfo = null;
+                        setDetectStatusN(n, 'notfound');
                     }
                 })
                 .catch(() => {
-                    if (getCurrentInputCode() === code) setDetectStatus('notfound', '✗ 識別查詢失敗（網絡問題），請手動選擇或重試');
+                    if (getCurrentInputCodeN(n) === code) setDetectStatusN(n, 'notfound', '✗ 識別查詢失敗（網絡問題），請手動選擇或重試');
                 });
         }, 400);
     }
+    function localDetectSupplier(code) { localDetectSupplierN(0, code); }
 
     // 明確的 calcType 對照表（不用數字大小猜測語義）：
     // suffix_1  = 去掉尾部 1 位校驗碼（2126050002014 → 212605000201）
@@ -666,175 +876,210 @@
         'suffix_12': { mode: 'take',  n: 12 }
     };
 
-    // 依 calcType 轉換掃描條碼為入庫代碼
     function stripCodesByCalcType(codes, calcType) {
         const t = getCalcTransform(calcType);
         if (!t) return codes;
         return codes.map(c => stripSingleCode(c, calcType));
     }
 
-    // 轉換單一代碼（依 calcType 對照表）；若代碼已經是入庫形式（識別時已確認）則不重複處理
     function stripSingleCode(c, calcType) {
         const t = getCalcTransform(calcType);
         if (!t) return c;
-        if (window.lastDetectInfo && window.lastDetectInfo.matchedCode === c) return c;
+        // 不再只檢查 window.lastDetectInfo，因為多品項時各品項獨立
         if (t.mode === 'take') {
-            // 取尾 n 位（代碼不足 n 位則不處理，可能已是入庫形式）
             return c.length > t.n ? c.substring(c.length - t.n) : c;
         }
-        // strip：去尾 n 位
         return c.length > t.n ? c.substring(0, c.length - t.n) : c;
     }
 
-    // 取得 calcType 的轉換規則（未定義的類型回傳 null = 不轉換）
     function getCalcTransform(calcType) {
         return CALC_TYPE_TRANSFORMS[(calcType || '').toString().trim()] || null;
     }
 
-    function applyLocalMatch(supplier, giftName) {
-        // 強制重新套用：不管目前選單狀態為何，一律重設供應商與重建項目清單，確保首碼更改時立即切換到新的供應商/項目
-        const sSelect = document.getElementById('useSupplierSelect');
-        sSelect.value = supplier;
-        useUpdateGiftSelect(giftName);
+    function applyLocalMatchN(n, supplier, giftName) {
+        const sSelect = useEl('useSupplierSelect', n);
+        if (sSelect) sSelect.value = supplier;
+        useUpdateGiftSelectN(n, giftName);
     }
+    function applyLocalMatch(supplier, giftName) { applyLocalMatchN(0, supplier, giftName); }
 
-    function useUpdateGiftSelect(targetGiftName) {
-        const s = document.getElementById('useSupplierSelect').value;
+    function useUpdateGiftSelectN(n, targetGiftName) {
+        const sSelect = useEl('useSupplierSelect', n);
+        const s = sSelect ? sSelect.value : '';
         const filtered = giftDatabase.filter(i => i.supplier === s);
-        const select = document.getElementById('useGiftSelect');
-        select.innerHTML = '<option value="">請選擇</option>' + filtered.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
-        if (targetGiftName) select.value = targetGiftName;
-        useAutoPreview();
+        const select = useEl('useGiftSelect', n);
+        if (select) {
+            select.innerHTML = '<option value="">請選擇</option>' + filtered.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
+            if (targetGiftName) select.value = targetGiftName;
+        }
+        useAutoPreviewN(n);
     }
+    function useUpdateGiftSelect(targetGiftName) { useUpdateGiftSelectN(0, targetGiftName); }
 
-    async function useAutoPreview() {
-        const mode = document.getElementById('useMode').value;
-        const supplier = document.getElementById('useSupplierSelect').value;
-        const gift = document.getElementById('useGiftSelect').value;
+    async function useAutoPreviewN(n) {
+        const modeEl = useEl('useMode', n);
+        const mode = modeEl ? modeEl.value : 'range';
+        const supplier = (useEl('useSupplierSelect', n) || {}).value || '';
+        const gift = (useEl('useGiftSelect', n) || {}).value || '';
+        const previewBox = useEl('previewBox', n);
         
-        if (!supplier || !gift) { document.getElementById('previewBox').style.display = 'none'; return; }
+        if (!supplier || !gift) { if (previewBox) previewBox.style.display = 'none'; return; }
         
         const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
-        if (!match) { document.getElementById('previewBox').style.display = 'none'; return; }
+        if (!match) { if (previewBox) previewBox.style.display = 'none'; return; }
         const hasTransform = !!getCalcTransform(match.calcType);
 
         let codes = [];
         if (mode === 'range') {
-            const start = document.getElementById('useStart').value.trim();
-            const end = document.getElementById('useEnd').value.trim();
-            if (!start || !end) { document.getElementById('previewBox').style.display = 'none'; return; }
-            // suffix 類型：先將首碼/尾碼轉換為入庫代碼，再展開範圍（否則數量會錯誤膨脹）
-            const sStripped = hasTransform ? stripSingleCode(start, match.calcType) : start;
-            const eStripped = hasTransform ? stripSingleCode(end, match.calcType) : end;
-            // 安全防護：範圍過大（多半是尾碼尚未輸入完整）時不展開、不送查詢，避免頁面卡死
+            const start = (useEl('useStart', n) || {}).value || '';
+            const end = (useEl('useEnd', n) || {}).value || '';
+            if (!start.trim() || !end.trim()) { if (previewBox) previewBox.style.display = 'none'; return; }
+            let sStripped = hasTransform ? stripSingleCode(start.trim(), match.calcType) : start.trim();
+            let eStripped = hasTransform ? stripSingleCode(end.trim(), match.calcType) : end.trim();
+            const sNumPart = parseInt((sStripped.match(/\d+$/) || ['0'])[0], 10);
+            const eNumPart = parseInt((eStripped.match(/\d+$/) || ['0'])[0], 10);
+            if (sNumPart > eNumPart) { const tmp = sStripped; sStripped = eStripped; eStripped = tmp; }
             const rc = getRangeCount(sStripped, eStripped);
-            if (rc === null || rc > MAX_RANGE_CODES) { document.getElementById('previewBox').style.display = 'none'; return; }
+            if (rc === null || rc > MAX_RANGE_CODES) { if (previewBox) previewBox.style.display = 'none'; return; }
             codes = getRangeCodes(sStripped, eStripped);
         } else {
-            codes = document.getElementById('useCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "");
-            // 清單模式：逐筆轉換
+            const codesEl = useEl('useCodes', n);
+            codes = codesEl ? codesEl.value.trim().split('\n').map(c => c.trim()).filter(c => c !== "") : [];
             if (hasTransform) codes = stripCodesByCalcType(codes, match.calcType);
         }
         
-        if (codes.length === 0) { document.getElementById('previewBox').style.display = 'none'; return; }
+        if (codes.length === 0) { if (previewBox) previewBox.style.display = 'none'; return; }
         
-        {
-            document.getElementById('pSup').innerText = match.supplier;
-            document.getElementById('pGift').innerText = match.name;
-            document.getElementById('pStart').innerText = codes[0] || "";
-            document.getElementById('pEnd').innerText = codes[codes.length - 1] || "";
-            document.getElementById('pExpiry').innerText = calculateExpiryDate(match.rule1);
-            document.getElementById('pCount').innerText = codes.length;
-            document.getElementById('previewBox').style.display = 'block';
-            window.currentUseMatch = match;
-            window.currentUseCodes = codes;
-            
-            document.getElementById('pUsageStatus').innerHTML = `<span style="color:#e6a700; font-weight:bold;">檢查中...</span>`;
-            document.getElementById('usageWarning').style.display = 'none';
-            
-            try {
-                const res = await fetch(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
-                const data = await res.json();
-                // 確認輸入未變才套用結果，避免舊回應覆蓋新輸入
-                if (window.currentUseCodes !== codes) return;
-                if (data.usedCodes && data.usedCodes.length > 0) {
-                    document.getElementById('pUsageStatus').innerHTML = `<span style="color:red">偵測到重複代碼 (${data.usedCodes.length} 張)</span>`;
-                    document.getElementById('usageWarning').innerHTML = `<strong>警語：代碼 ${data.usedCodes.join(', ')} 已被登記使用過！確認要再登記？</strong>`;
-                    document.getElementById('usageWarning').style.display = 'block';
-                } else {
-                    document.getElementById('pUsageStatus').innerHTML = `<span style="color:#28a745;">未使用</span>`;
-                    document.getElementById('usageWarning').style.display = 'none';
-                }
-            } catch (err) {
-                // 網絡錯誤或回應異常：顯示提示而非讓頁面發生未捕獲錯誤
-                document.getElementById('pUsageStatus').innerHTML = `<span style="color:#e6a700;">使用狀態檢查失敗（可重整預覽重試），不影響出庫</span>`;
+        // 更新預覽資訊
+        const pSup = useEl('pSup', n); if (pSup) pSup.innerText = match.supplier;
+        const pGift = useEl('pGift', n); if (pGift) pGift.innerText = match.name;
+        const pStart = useEl('pStart', n); if (pStart) pStart.innerText = codes[0] || "";
+        const pEnd = useEl('pEnd', n); if (pEnd) pEnd.innerText = codes[codes.length - 1] || "";
+        const pExpiry = useEl('pExpiry', n); if (pExpiry) pExpiry.innerText = calculateExpiryDate(match.rule1);
+        const pCount = useEl('pCount', n); if (pCount) pCount.innerText = codes.length;
+        if (previewBox) previewBox.style.display = 'block';
+        itemCurrentUseMatches[n] = match;
+        itemCurrentUseCodes[n] = codes;
+        // 向後相容（品項 0 同步到 window 變數）
+        if (n === 0) { window.currentUseMatch = match; window.currentUseCodes = codes; }
+        
+        const pUsageStatus = useEl('pUsageStatus', n);
+        const usageWarning = useEl('usageWarning', n);
+        if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e6a700; font-weight:bold;">檢查中...</span>`;
+        if (usageWarning) usageWarning.style.display = 'none';
+        
+        try {
+            const res = await fetch(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+            const data = await res.json();
+            if (itemCurrentUseCodes[n] !== codes) return;
+            if (data.usedCodes && data.usedCodes.length > 0) {
+                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:red">偵測到重複代碼 (${data.usedCodes.length} 張)</span>`;
+                if (usageWarning) { usageWarning.innerHTML = `<strong>警語：代碼 ${data.usedCodes.join(', ')} 已被登記使用過！確認要再登記？</strong>`; usageWarning.style.display = 'block'; }
+            } else {
+                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#28a745;">未使用</span>`;
+                if (usageWarning) usageWarning.style.display = 'none';
             }
+        } catch (err) {
+            if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e6a700;">使用狀態檢查失敗（可重整預覽重試），不影響出庫</span>`;
         }
     }
+    async function useAutoPreview() { await useAutoPreviewN(0); }
 
     async function useConfirmSubmit() {
         const orderNo = document.getElementById('useOrderNo').value;
         if (!orderNo) { alert('請填寫訂單號'); return; }
-        
-        const warningBox = document.getElementById('usageWarning');
-        const isDuplicate = warningBox && warningBox.style.display === 'block';
-        
-        if (isDuplicate) {
-            const confirmMsg = "偵測到重複代碼，確定要繼續登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)";
+
+        const activeIndices = getActiveItemIndices();
+        // 檢查每個品項是否都有有效資料
+        const itemsToSubmit = [];
+        for (const n of activeIndices) {
+            const codes = itemCurrentUseCodes[n];
+            const match = itemCurrentUseMatches[n];
+            if (!codes || codes.length === 0 || !match) {
+                alert(`品項 ${n + 1} 尚未完成設定（請確認已選擇供應商/項目並輸入代碼）`);
+                return;
+            }
+            const warningEl = useEl('usageWarning', n);
+            const hasDup = warningEl && warningEl.style.display === 'block';
+            itemsToSubmit.push({ n, codes, match, hasDup });
+        }
+
+        // 如果任一品項有重複代碼警告，統一確認
+        const anyDup = itemsToSubmit.some(it => it.hasDup);
+        if (anyDup) {
+            const confirmMsg = "偵測到部分品項有重複代碼，確定要繼續登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)";
             if (!confirm(confirmMsg)) return;
         }
-        
-        const codes = window.currentUseCodes;
-        const match = window.currentUseMatch;
-        const expiry = document.getElementById('pExpiry').innerText;
-        const processId = generateProcessId();
-        const startTime = new Date();
 
-        // 添加到處理中列表
-        addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime);
-
-        // 立即清空表單以便下一單使用
-        document.getElementById('useStart').value = ""; 
-        document.getElementById('useEnd').value = ""; 
-        document.getElementById('useCodes').value = "";
-        document.getElementById('useOrderNo').value = ""; 
-        document.getElementById('useSupplierSelect').value = "";
-        document.getElementById('useGiftSelect').innerHTML = '<option value="">請選擇</option>';
-        document.getElementById('previewBox').style.display = 'none';
-        setDetectStatus('clear');
-        document.getElementById('useQuickCount').innerText = "";
+        // 清空表單（全部品項）
+        document.getElementById('useOrderNo').value = "";
+        for (const n of activeIndices) {
+            const startEl = useEl('useStart', n); if (startEl) startEl.value = '';
+            const endEl = useEl('useEnd', n); if (endEl) endEl.value = '';
+            const codesEl = useEl('useCodes', n); if (codesEl) codesEl.value = '';
+            const supEl = useEl('useSupplierSelect', n); if (supEl) supEl.value = '';
+            const giftEl = useEl('useGiftSelect', n); if (giftEl) giftEl.innerHTML = '<option value="">請選擇</option>';
+            const pb = useEl('previewBox', n); if (pb) pb.style.display = 'none';
+            setDetectStatusN(n, 'clear');
+            const qc = useEl('useQuickCount', n); if (qc) qc.innerText = '';
+            itemLastDetectedCodes[n] = null;
+            itemLastDetectInfos[n] = null;
+            itemCurrentUseCodes[n] = null;
+            itemCurrentUseMatches[n] = null;
+        }
         lastDetectedCode = null;
+        window.currentUseCodes = null;
+        window.currentUseMatch = null;
 
-        try {
-            const res = await fetch(API_URL, { 
-                method: "POST", 
-                body: JSON.stringify({ 
-                    mode: 'use', 
-                    user: currentUser, 
-                    payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
-                    allCodes: codes, // V3.7.1 傳完整代碼清單讓後端拆成連續子範圍寫入 Records
-                    recordInfo: {
-                        supplier: match.supplier,
-                        gift: match.name,
-                        start: codes[0],
-                        end: codes[codes.length-1],
-                        count: codes.length,
-                        orderNo: orderNo,
-                        expiry: expiry
+        // 移除額外品項區塊（保留品項 0）
+        const container = document.getElementById('useItemsContainer');
+        container.querySelectorAll('.use-item-block').forEach(block => {
+            if (parseInt(block.getAttribute('data-item-index')) !== 0) block.remove();
+        });
+        useItemCount = 1;
+        document.getElementById('addItemBtn').disabled = false;
+
+        // 逐品項提交（各自獨立的 Task Center 條目）
+        for (const item of itemsToSubmit) {
+            const { codes, match } = item;
+            const expiry = calculateExpiryDate(match.rule1);
+            const processId = generateProcessId();
+            const startTime = new Date();
+            addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1]);
+
+            // 非同步提交（不阻擋下一個品項的提交）
+            (async () => {
+                try {
+                    const res = await fetch(API_URL, { 
+                        method: "POST", 
+                        body: JSON.stringify({ 
+                            mode: 'use', 
+                            user: currentUser, 
+                            payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
+                            allCodes: codes,
+                            recordInfo: {
+                                supplier: match.supplier,
+                                gift: match.name,
+                                start: codes[0],
+                                end: codes[codes.length-1],
+                                count: codes.length,
+                                orderNo: orderNo,
+                                expiry: expiry
+                            }
+                        }) 
+                    });
+                    const data = await res.json();
+                    if (data.result === "success") {
+                        updateProcessingStatus(processId, 'completed', startTime);
+                        showToast("已完成記錄");
+                        loadStats();
+                    } else { 
+                        throw new Error(data.message); 
                     }
-                }) 
-            });
-            const data = await res.json();
-            if (data.result === "success") {
-                updateProcessingStatus(processId, 'completed', startTime);
-                showToast("已完成記錄");
-                loadStats();
-            } else { 
-                throw new Error(data.message); 
-            }
-        } catch (err) { 
-            updateProcessingStatus(processId, 'problem', startTime, err.message);
-            alert("提交失敗: " + err.message); 
+                } catch (err) { 
+                    updateProcessingStatus(processId, 'problem', startTime, err.message);
+                }
+            })();
         }
     }
 
@@ -851,7 +1096,7 @@
 
     const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
-    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime) {
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd) {
         processingStatuses.processing.push({
             id: id,
             orderNo: orderNo,
@@ -859,7 +1104,9 @@
             supplier: supplier,
             gift: gift,
             startTime: startTime,
-            status: 'processing'
+            status: 'processing',
+            codeStart: codeStart || '',
+            codeEnd: codeEnd || ''
         });
         updateStatusDisplay();
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
@@ -891,7 +1138,9 @@
             startTime: startTime,
             duration: duration,
             errorMsg: errorMsg,
-            status: newStatus
+            status: newStatus,
+            codeStart: item.codeStart || '',
+            codeEnd: item.codeEnd || ''
         };
 
         if (newStatus === 'completed') {
@@ -926,12 +1175,22 @@
         }
     }
 
+    function formatCodeRange(item) {
+        if (item.codeStart && item.codeEnd && item.codeStart !== item.codeEnd) {
+            return `代碼: ${item.codeStart} ~ ${item.codeEnd}`;
+        } else if (item.codeStart) {
+            return `代碼: ${item.codeStart}`;
+        }
+        return '';
+    }
+
     function updateStatusDisplay() {
         // 更新處理中
         const processingList = document.getElementById('processingList');
         processingList.innerHTML = processingStatuses.processing.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.processing.forEach(item => {
             const elapsed = ((new Date() - item.startTime) / 1000).toFixed(1);
+            const codeInfo = formatCodeRange(item);
             processingList.innerHTML += `
                 <div class="status-item processing">
                     <div class="status-item-header">
@@ -940,7 +1199,7 @@
                     </div>
                     <div class="status-item-content">
                         ${item.supplier} - ${item.gift}<br/>
-                        數量: ${item.count} 張
+                        數量: ${item.count} 張${codeInfo ? '<br/>' + codeInfo : ''}
                     </div>
                 </div>
             `;
@@ -951,6 +1210,7 @@
         const completedList = document.getElementById('completedList');
         completedList.innerHTML = processingStatuses.completed.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.completed.forEach(item => {
+            const codeInfo = formatCodeRange(item);
             completedList.innerHTML += `
                 <div class="status-item completed">
                     <div class="status-item-header">
@@ -959,7 +1219,7 @@
                     </div>
                     <div class="status-item-content">
                         ${item.supplier} - ${item.gift}<br/>
-                        數量: ${item.count} 張
+                        數量: ${item.count} 張${codeInfo ? '<br/>' + codeInfo : ''}
                     </div>
                 </div>
             `;
@@ -970,6 +1230,7 @@
         const problemList = document.getElementById('problemList');
         problemList.innerHTML = processingStatuses.problem.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.problem.forEach(item => {
+            const codeInfo = formatCodeRange(item);
             problemList.innerHTML += `
                 <div class="status-item problem">
                     <div class="status-item-header">
@@ -978,7 +1239,7 @@
                     </div>
                     <div class="status-item-content">
                         ${item.supplier} - ${item.gift}<br/>
-                        數量: ${item.count} 張
+                        數量: ${item.count} 張${codeInfo ? '<br/>' + codeInfo : ''}
                     </div>
                     <div class="status-item-problems">
                         <strong>問題:</strong> ${item.errorMsg}
@@ -993,6 +1254,7 @@
         const solvedList = document.getElementById('solvedList');
         solvedList.innerHTML = processingStatuses.solved.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.solved.forEach(item => {
+            const codeInfo = formatCodeRange(item);
             solvedList.innerHTML += `
                 <div class="status-item solved">
                     <div class="status-item-header">
@@ -1001,7 +1263,7 @@
                     </div>
                     <div class="status-item-content">
                         ${item.supplier} - ${item.gift}<br/>
-                        數量: ${item.count} 張
+                        數量: ${item.count} 張${codeInfo ? '<br/>' + codeInfo : ''}
                     </div>
                 </div>
             `;
@@ -1058,7 +1320,7 @@
         const processId = generateProcessId();
         const startTime = new Date();
         const codes = getRangeCodes(start, end);
-        addProcessingStatus(processId, `啟用 ${start}~${end}`, codes.length || '-', '啟用作業', '範圍啟動', startTime);
+        addProcessingStatus(processId, `啟用 ${start}~${end}`, codes.length || '-', '啟用作業', '範圍啟動', startTime, start, end);
 
         // 標示該列狀態為啟用中
         const cell = document.getElementById(`act-status-${idx}`);
@@ -1085,13 +1347,7 @@
 
     function toggleRegMode(m) { document.getElementById('regList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('regRange').style.display = (m === 'range') ? 'block' : 'none'; }
     function toggleActMode(m) { document.getElementById('actList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('actRange').style.display = (m === 'range') ? 'block' : 'none'; }
-    function toggleUseMode(m) {
-        document.getElementById('useRangeSection').style.display = (m === 'range') ? 'block' : 'none';
-        document.getElementById('useListSection').style.display = (m === 'list') ? 'block' : 'none';
-        document.getElementById('pRangeDisplay').style.display = (m === 'range') ? 'block' : 'none';
-        document.getElementById('pListDisplay').style.display = (m === 'list') ? 'block' : 'none';
-        useAutoPreview();
-    }
+    function toggleUseMode(m) { toggleUseModeN(0, m); }
     function updateGiftMenu() { var s = document.getElementById('supplierSelect').value; var g = document.getElementById('giftSelect'); g.innerHTML = '<option value="">請選擇</option>'; giftDatabase.filter(r => r.supplier === s).forEach(r => { var opt = document.createElement('option'); opt.value = r.name; opt.text = r.name; g.appendChild(opt); }); }
     function calculateExpiryDate(rule) { if (!rule || rule === 'N/A') return 'N/A'; if (rule.includes('m_end')) { const months = parseInt(rule); const date = new Date(); date.setMonth(date.getMonth() + months + 1); date.setDate(0); return date.toISOString().split('T')[0]; } return rule; }
     // 範圍展開安全上限：防止掃描器輸入途中（代碼不完整）時首尾碼差距巨大，展開出百萬級陣列導致頁面卡死
@@ -1099,13 +1355,15 @@
     function getRangeCodes(start, end) {
         var sStr = start.toString().trim(); var eStr = end.toString().trim();
         if(!sStr || !eStr) return [];
-        var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/);
+        var sMatch = sStr.match(/^([A-Za-z]*)(.*)$/); var eMatch = eStr.match(/^([A-Za-z]*)(.*)$/); 
         var prefix = sMatch[1] || ""; var ePrefix = eMatch[1] || "";
         if (prefix !== ePrefix) return []; // 前綴不一致，範圍無效
         var sNumStr = sMatch[2] || ""; var eNumStr = eMatch[2] || "";
         if (!/^\d+$/.test(sNumStr) || !/^\d+$/.test(eNumStr)) return []; // 非純數字部分，無法展開
         var sVal = parseInt(sNumStr, 10); var eVal = parseInt(eNumStr, 10);
-        if (isNaN(sVal) || isNaN(eVal) || eVal < sVal) return [];
+        if (isNaN(sVal) || isNaN(eVal)) return [];
+        // 自動交換：首尾碼反轉時自動修正（大號在首碼、小號在尾碼）
+        if (sVal > eVal) { var tmp = sVal; sVal = eVal; eVal = tmp; var tmpStr = sNumStr; sNumStr = eNumStr; eNumStr = tmpStr; }
         if (eVal - sVal + 1 > MAX_RANGE_CODES) return []; // 超過安全上限（多半是代碼未輸入完整），不展開
         var padLen = sNumStr.length;
         var codes = [];
@@ -1113,7 +1371,7 @@
         return codes;
     }
     function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(c => c.trim() !== "").length; }
-    function calcTotalRange(p) { var s = document.getElementById(p + 'Start').value.trim(); var e = document.getElementById(p + 'End').value.trim(); if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; } var sMatch = s.match(/^([A-Za-z]*)(.*)$/); var eMatch = e.match(/^([A-Za-z]*)(.*)$/); var sNum = parseInt(sMatch[2] || "0", 10); var eNum = parseInt(eMatch[2] || "0", 10); var total = (sNum && eNum && eNum >= sNum) ? (eNum - sNum + 1) : 0; document.getElementById(p + 'Total').innerText = "總張數: " + total; }
+    function calcTotalRange(p) { var s = document.getElementById(p + 'Start').value.trim(); var e = document.getElementById(p + 'End').value.trim(); if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; } var sMatch = s.match(/^([A-Za-z]*)(.*)$/); var eMatch = e.match(/^([A-Za-z]*)(.*)$/); var sNum = parseInt(sMatch[2] || "0", 10); var eNum = parseInt(eMatch[2] || "0", 10); if (sNum > eNum) { var tmp = sNum; sNum = eNum; eNum = tmp; } var total = (sNum && eNum) ? (eNum - sNum + 1) : 0; document.getElementById(p + 'Total').innerText = "總張數: " + total; }
 </script>
 </body>
 </html>
