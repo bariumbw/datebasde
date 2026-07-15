@@ -49,6 +49,7 @@
     .status-part { background: #e2e3e5; color: #383d41; }
     .type-reg { color: #0071e3; font-weight: bold; }
     .type-use { color: #28a745; font-weight: bold; }
+    .type-return { color: #ff9500; font-weight: bold; }
     
     .filter-bar { background: #f9f9f9; padding: 15px; border-radius: 12px; margin-bottom: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; border: 1px solid var(--border-color); }
     .tab-container { display: flex; gap: 10px; margin-bottom: 15px; }
@@ -111,6 +112,7 @@
                 <button id="nav-regPage" class="nav-btn" onclick="switchPage('regPage')">登記新券 (入庫)</button>
                 <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
                 <button id="nav-usePage" class="nav-btn" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
+                <button id="nav-returnPage" class="nav-btn" onclick="switchPage('returnPage')">禮券退回</button>
                 <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
             </nav>
 
@@ -246,6 +248,62 @@
                 </div>
             </div>
 
+            <!-- 禮券退回 -->
+            <div id="returnPage" class="page">
+                <h2>禮券退回</h2>
+                <div class="return-section">
+                    <div class="form-group">
+                        <label>退回代碼 (每行一個代碼)</label>
+                        <textarea id="returnCodes" rows="5" oninput="returnDetectCodes()" placeholder="請輸入要退回的代碼，每行一個"></textarea>
+                    </div>
+                    <div id="returnDetectInfo" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
+                    <div id="returnCodeCount" style="font-size:14px; font-weight:bold; margin-top:5px; color:var(--primary-blue);"></div>
+                    <div class="form-group" style="margin-top:15px;">
+                        <label>退回方式</label>
+                        <select id="returnMode" onchange="toggleReturnMode()">
+                            <option value="exchange">更換 (退回舊券 + 換發新券)</option>
+                            <option value="returnOnly">只退回 (標記為未使用)</option>
+                        </select>
+                    </div>
+                    <div id="exchangeSection">
+                        <div class="form-group">
+                            <label>更換代碼 (每行一個，數量需與退回代碼相同)</label>
+                            <textarea id="exchangeCodes" rows="5" oninput="exchangeDetectCodes()" placeholder="請輸入更換的新代碼，每行一個"></textarea>
+                        </div>
+                        <div id="exchangeDetectInfo" style="font-size:13px; margin-top:5px; min-height:18px;"></div>
+                        <div id="exchangePreviewBox" style="display:none; background:#f0f7ff; padding:15px; border-radius:10px; margin-top:10px; border:1px solid #cce5ff;">
+                            <p><strong>更換禮券預覽資訊</strong></p>
+                            <p>供應商: <span id="exPSup"></span> | 項目: <span id="exPGift"></span></p>
+                            <p>範圍: <span id="exPRange"></span></p>
+                            <p>有效日期: <span id="exPExpiry"></span></p>
+                            <p>使用狀態: <span id="exPUsage"></span></p>
+                            <p>系統計算數量: <strong id="exPCount" style="color:red; font-size:18px;"></strong></p>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:15px;">
+                        <label>退回原因 (選填)</label>
+                        <select id="returnReasonSelect" onchange="toggleReturnReasonOther()">
+                            <option value="">請選擇</option>
+                            <option value="禮券有瑕疵">禮券有瑕疵</option>
+                            <option value="禮券有色差">禮券有色差</option>
+                            <option value="日期錯誤">日期錯誤</option>
+                            <option value="other">其他 (請填寫)</option>
+                        </select>
+                        <input type="text" id="returnReasonOther" style="display:none; margin-top:8px;" placeholder="請輸入退回原因...">
+                    </div>
+                </div>
+                <div id="returnPreview" style="display:none; background:#fff8e1; padding:15px; border-radius:10px; margin-top:15px; border:1px solid #ffe082;">
+                    <p><strong>退回預覽</strong></p>
+                    <p>退回數量: <strong id="rpCount" style="color:red; font-size:18px;"></strong></p>
+                    <p>退回方式: <span id="rpMode"></span></p>
+                    <div id="rpReturnList" style="margin-top:10px;"></div>
+                    <div id="rpExchangeList" style="margin-top:10px; display:none;"></div>
+                    <p id="rpReasonLine">退回原因: <span id="rpReason"></span></p>
+                </div>
+                <button onclick="returnPreview()" style="width:100%; padding:12px; margin-top:15px; background:var(--warning-orange);">預覽退回</button>
+                <button id="returnConfirmBtn" onclick="returnConfirmSubmit()" style="width:100%; padding:12px; margin-top:10px; background:var(--danger-red); display:none;">確認退回</button>
+            </div>
+
             <!-- 流水帳記錄管理 -->
             <div id="recordsPage" class="page">
                 <h2>流水帳記錄管理</h2>
@@ -253,6 +311,7 @@
                     <button id="tab-all" class="tab-btn active" onclick="filterRecordsByType('')">全部</button>
                     <button id="tab-use" class="tab-btn" onclick="filterRecordsByType('使用')">使用</button>
                     <button id="tab-reg" class="tab-btn" onclick="filterRecordsByType('登記')">登記</button>
+                    <button id="tab-return" class="tab-btn" onclick="filterRecordsByType('退回')">退回</button>
                 </div>
                 <div class="filter-bar">
                     <select id="filterSupplier" onchange="renderRecords(true)">
@@ -266,8 +325,10 @@
                         <option value="act">已啟動</option>
                         <option value="unact">未啟動/部分未啟動</option>
                         <option value="noreg">查無入庫記錄</option>
+                        <option value="na">不適用</option>
                     </select>
                     <button onclick="loadRecords()" style="font-size:12px;">刷新</button>
+                    <button id="mergeToggleBtn" onclick="toggleMergeView()" style="font-size:12px; background:#6c5ce7; color:white;">合併未啟動</button>
                 </div>
                 <table id="recordsTable">
                     <thead><tr>
@@ -466,7 +527,7 @@
     function filterRecordsByType(type) {
         currentTypeFilter = type;
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        const tabId = type === '使用' ? 'tab-use' : (type === '登記' ? 'tab-reg' : 'tab-all');
+        const tabId = type === '使用' ? 'tab-use' : (type === '登記' ? 'tab-reg' : (type === '退回' ? 'tab-return' : 'tab-all'));
         document.getElementById(tabId).classList.add('active');
         renderRecords(true);
     }
@@ -491,7 +552,7 @@
         filtered = filtered.filter(item => {
             const r = item.data;
             const type = r[10] || "使用";
-            const matchType = !currentTypeFilter || type === currentTypeFilter;
+            const matchType = !currentTypeFilter || type === currentTypeFilter || (currentTypeFilter === '退回' && type === '更換出庫');
             const matchSupplier = !fSupplier || r[1] === fSupplier;
             const matchUser = r[6].toLowerCase().includes(fUser);
             const matchOrder = String(r[7]).toLowerCase().includes(fOrder);
@@ -503,8 +564,9 @@
                 if (fAct === 'act') matchAct = actStatusCache[idx] === 'act';
                 else if (fAct === 'unact') matchAct = actStatusCache[idx] === 'unact' || actStatusCache[idx] === 'part';
                 else if (fAct === 'noreg') matchAct = actStatusCache[idx] === 'noreg';
+                else if (fAct === 'na') matchAct = actStatusCache[idx] === 'na';
             } else if (fAct && actStatusCache[idx] === undefined) {
-                matchAct = false; // 尚未查詢到的記錄暂不顯示
+                matchAct = false; // 尚未查詢到的記錄暫不顯示
             }
             return matchType && matchSupplier && matchUser && matchOrder && matchDate && matchAct;
         });
@@ -523,12 +585,15 @@
             const idx = item.oriIndex;
             const isDel = r[9] === "已登記刪除";
             const type = r[10] || "使用";
-            const typeClass = type === "登記" ? "type-reg" : "type-use";
+            const typeClass = type === "登記" ? "type-reg" : (type === "退回" || type === "更換出庫" ? "type-return" : "type-use");
+            // 退回和登記類型不顯示啟用按鈕，退回顯示「不適用」
+            const noActivation = (type === '登記' || type === '退回');
             const tr = document.createElement('tr');
             tr.id = `row-${idx}`;
-            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td id="act-status-${idx}">讀取中...</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
+            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td id="act-status-${idx}">${noActivation ? (type === '退回' ? '不適用' : '-') : '讀取中...'}</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
             body.appendChild(tr);
-            if (!isDel) checkActivationStatus(r[3], r[4], idx);
+            if (!isDel && !noActivation) checkActivationStatus(r[3], r[4], idx);
+            else if (noActivation) { actStatusCache[idx] = 'na'; }
             else document.getElementById(`act-status-${idx}`).innerText = "-";
         }
         renderRecordsPager(totalPages, filtered.length);
@@ -558,6 +623,120 @@
         // 下一頁
         if (recordsCurrentPage < totalPages) html += `<button style="${btnStyle}" onclick="goToRecordsPage(${recordsCurrentPage + 1})">下一頁</button>`;
         pager.innerHTML = html;
+    }
+
+    // ========== 合併未啟動記錄檢視 ==========
+    let isMergeView = false;
+
+    function toggleMergeView() {
+        isMergeView = !isMergeView;
+        const btn = document.getElementById('mergeToggleBtn');
+        if (isMergeView) {
+            btn.style.background = '#e74c3c';
+            btn.innerText = '退出合併';
+            renderMergeView();
+        } else {
+            btn.style.background = '#6c5ce7';
+            btn.innerText = '合併未啟動';
+            renderRecords(true);
+        }
+    }
+
+    function renderMergeView() {
+        if (!recordsCache || recordsCache.length === 0) {
+            const body = document.getElementById('recordsBody');
+            body.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999; padding:20px;">暫時沒有未啟用的代碼</td></tr>';
+            document.getElementById('recordsPager').innerHTML = '';
+            return;
+        }
+        // 篩選未啟動的使用記錄（只包含確認未啟動和部分未啟動的，不包含尚未查詢的）
+        const unactRecords = [];
+        for (let i = 0; i < recordsCache.length; i++) {
+            const r = recordsCache[i];
+            const type = r[10] || '使用';
+            const status = r[9] || '';
+            if (type !== '使用' || status === '已登記刪除') continue;
+            const cached = actStatusCache[i];
+            // 只包含確認未啟動和部分未啟動
+            if (cached === 'unact' || cached === 'part') {
+                unactRecords.push({ data: r, oriIndex: i });
+            }
+        }
+
+        // 按供應商+項目分組，同組內合併連續範圍
+        const groups = {}; // key: "供應商||項目" => [{start, end, count, sNum, eNum, prefix, padLen}]
+        unactRecords.forEach(item => {
+            const r = item.data;
+            const supplier = r[1] || '';
+            const gift = r[2] || '';
+            const startCode = (r[3] || '').toString().trim();
+            const endCode = (r[4] || '').toString().trim();
+            const count = parseInt(r[5]) || 0;
+            if (!startCode || !endCode) return;
+
+            const key = supplier + '||' + gift;
+            if (!groups[key]) groups[key] = [];
+
+            // 解析代碼結構
+            const sMatch = startCode.match(/^([A-Za-z]*)(.*)$/);
+            const eMatch = endCode.match(/^([A-Za-z]*)(.*)$/);
+            const prefix = sMatch[1] || '';
+            const sNumStr = sMatch[2] || '0';
+            const eNumStr = eMatch[2] || '0';
+            const sNum = parseInt(sNumStr, 10);
+            const eNum = parseInt(eNumStr, 10);
+            const padLen = sNumStr.length;
+
+            groups[key].push({ start: startCode, end: endCode, count, sNum, eNum, prefix, padLen });
+        });
+
+        // 合併同組內的連續範圍
+        const mergedResults = [];
+        for (const key in groups) {
+            const [supplier, gift] = key.split('||');
+            const ranges = groups[key];
+            // 按前綴+數字排序
+            ranges.sort((a, b) => {
+                if (a.prefix !== b.prefix) return a.prefix < b.prefix ? -1 : 1;
+                return a.sNum - b.sNum;
+            });
+
+            // 合併連續範圍
+            let merged = [];
+            let cur = { ...ranges[0] };
+            for (let i = 1; i < ranges.length; i++) {
+                const next = ranges[i];
+                // 同前綴且連續（上一個的 eNum + 1 === 下一個的 sNum）
+                if (next.prefix === cur.prefix && next.sNum === cur.eNum + 1 && next.padLen === cur.padLen) {
+                    cur.eNum = next.eNum;
+                    cur.end = next.end;
+                    cur.count += next.count;
+                } else {
+                    merged.push(cur);
+                    cur = { ...next };
+                }
+            }
+            merged.push(cur);
+
+            merged.forEach(m => {
+                mergedResults.push({ supplier, gift, start: m.start, end: m.end, count: m.count });
+            });
+        }
+
+        // 渲染合併表格
+        const body = document.getElementById('recordsBody');
+        body.innerHTML = '';
+        if (mergedResults.length === 0) {
+            body.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999; padding:20px;">暫時沒有未啟用的代碼</td></tr>';
+        } else {
+            mergedResults.forEach((m, mIdx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>-</td><td class="type-use">使用</td><td>${m.supplier}</td><td>${m.gift}</td><td>${m.start}</td><td>${m.end}</td><td><strong>${m.count}</strong></td><td>-</td><td>-</td><td><span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${m.start}', '${m.end}', 'merge_${mIdx}')">啟用</button></td><td>-</td>`;
+                body.appendChild(tr);
+            });
+        }
+        // 顯示合併模式資訊
+        document.getElementById('recordsPager').innerHTML = `<span style="font-size:12px; color:#6c5ce7; font-weight:bold;">合併檢視模式 - 共 ${mergedResults.length} 組</span>`;
     }
 
     async function checkActivationStatus(start, end, idx, filter) {
@@ -1506,6 +1685,213 @@
     }
     function calcTotal(id, target) { document.getElementById(target).innerText = "總張數: " + document.getElementById(id).value.trim().split('\n').filter(c => c.trim() !== "").length; }
     function calcTotalRange(p) { var s = document.getElementById(p + 'Start').value.trim(); var e = document.getElementById(p + 'End').value.trim(); if(!s || !e) { document.getElementById(p + 'Total').innerText = "總張數: 0"; return; } var sMatch = s.match(/^([A-Za-z]*)(.*)$/); var eMatch = e.match(/^([A-Za-z]*)(.*)$/); var sNum = parseInt(sMatch[2] || "0", 10); var eNum = parseInt(eMatch[2] || "0", 10); if (sNum > eNum) { var tmp = sNum; sNum = eNum; eNum = tmp; } var total = (sNum && eNum) ? (eNum - sNum + 1) : 0; document.getElementById(p + 'Total').innerText = "總張數: " + total; }
+
+    // ========== 禮券退回功能 ==========
+    let returnDetectTimer = null;
+    let exchangeDetectTimer = null;
+
+    function toggleReturnReasonOther() {
+        const sel = document.getElementById('returnReasonSelect').value;
+        document.getElementById('returnReasonOther').style.display = sel === 'other' ? 'block' : 'none';
+        if (sel !== 'other') document.getElementById('returnReasonOther').value = '';
+    }
+
+    function getReturnReason() {
+        const sel = document.getElementById('returnReasonSelect').value;
+        if (sel === 'other') return document.getElementById('returnReasonOther').value.trim();
+        return sel || '';
+    }
+
+    function toggleReturnMode() {
+        const mode = document.getElementById('returnMode').value;
+        document.getElementById('exchangeSection').style.display = mode === 'exchange' ? 'block' : 'none';
+        document.getElementById('returnPreview').style.display = 'none';
+        document.getElementById('returnConfirmBtn').style.display = 'none';
+    }
+
+    function returnDetectCodes() {
+        clearTimeout(returnDetectTimer);
+        returnDetectTimer = setTimeout(async () => {
+            const codes = document.getElementById('returnCodes').value.trim().split('\n').filter(c => c.trim() !== '').map(c => c.trim());
+            const countEl = document.getElementById('returnCodeCount');
+            const infoEl = document.getElementById('returnDetectInfo');
+            countEl.innerText = codes.length > 0 ? `退回數量: ${codes.length} 張` : '';
+            if (codes.length === 0) { infoEl.innerHTML = ''; return; }
+            // 查詢代碼狀態（供應商/項目/訂單號/使用狀態）
+            infoEl.innerHTML = '<span style="color:#e6a700;">偵測中...</span>';
+            try {
+                const res = await fetch(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+                const data = await res.json();
+                if (data.results && data.results.length > 0) {
+                    const first = data.results[0];
+                    if (first.notFound) {
+                        infoEl.innerHTML = '<span style="color:red;">✗ 無法識別代碼，請確認代碼是否正確</span>';
+                    } else {
+                        // 找出訂單號（取第一個有訂單號的代碼）
+                        const orderInfo = data.results.find(r => r.orderNo && !r.notFound);
+                        const orderNo = orderInfo ? orderInfo.orderNo : '無';
+                        // 統計使用狀態
+                        const usedCount = data.results.filter(r => r.usageStatus === '已使用').length;
+                        const unusedCount = data.results.filter(r => r.usageStatus === '未使用').length;
+                        let statusText = '';
+                        if (usedCount === codes.length) statusText = `<span style="color:#28a745;">全部已使用</span>`;
+                        else if (unusedCount === codes.length) statusText = `<span style="color:#e6a700;">全部未使用</span>`;
+                        else statusText = `<span style="color:#e6a700;">已使用 ${usedCount} / 未使用 ${unusedCount}</span>`;
+                        infoEl.innerHTML = `<span style="color:#28a745;">✓ 已識別: ${first.supplier} / ${first.giftName}</span><br>訂單號: <strong>${orderNo}</strong> | 狀態: ${statusText}`;
+                    }
+                } else {
+                    infoEl.innerHTML = '<span style="color:red;">✗ 無法識別代碼</span>';
+                }
+            } catch (err) {
+                infoEl.innerHTML = '<span style="color:#e6a700;">偵測失敗</span>';
+            }
+        }, 600);
+        document.getElementById('returnPreview').style.display = 'none';
+        document.getElementById('returnConfirmBtn').style.display = 'none';
+    }
+
+    function exchangeDetectCodes() {
+        clearTimeout(exchangeDetectTimer);
+        exchangeDetectTimer = setTimeout(async () => {
+            const codes = document.getElementById('exchangeCodes').value.trim().split('\n').filter(c => c.trim() !== '').map(c => c.trim());
+            const infoEl = document.getElementById('exchangeDetectInfo');
+            const previewBox = document.getElementById('exchangePreviewBox');
+            if (codes.length === 0) { infoEl.innerHTML = ''; previewBox.style.display = 'none'; return; }
+            infoEl.innerHTML = '<span style="color:#e6a700;">偵測中...</span>';
+            try {
+                const res = await fetch(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+                const data = await res.json();
+                if (data.results && data.results.length > 0) {
+                    const first = data.results[0];
+                    if (first.notFound) {
+                        infoEl.innerHTML = '<span style="color:red;">✗ 無法識別代碼，請確認代碼是否已入庫</span>';
+                        previewBox.style.display = 'none';
+                    } else {
+                        infoEl.innerHTML = `<span style="color:#28a745;">✓ 已識別: ${first.supplier} / ${first.giftName}</span>`;
+                        // 填充預覽資訊
+                        document.getElementById('exPSup').innerText = first.supplier;
+                        document.getElementById('exPGift').innerText = first.giftName;
+                        document.getElementById('exPRange').innerText = codes[0] + ' ~ ' + codes[codes.length - 1];
+                        // 計算有效日期
+                        const match = giftDatabase.find(g => g.name === first.giftName && g.supplier === first.supplier);
+                        document.getElementById('exPExpiry').innerText = match ? calculateExpiryDate(match.rule1) : '未知';
+                        // 使用狀態
+                        const usedCount = data.results.filter(r => r.usageStatus === '已使用').length;
+                        const unusedCount = data.results.filter(r => r.usageStatus === '未使用').length;
+                        let usageHtml = '';
+                        if (usedCount > 0) usageHtml = `<span style="color:red;">有 ${usedCount} 張已使用</span>`;
+                        else usageHtml = `<span style="color:#28a745;">全部未使用</span>`;
+                        document.getElementById('exPUsage').innerHTML = usageHtml;
+                        document.getElementById('exPCount').innerText = codes.length;
+                        previewBox.style.display = 'block';
+                    }
+                } else {
+                    infoEl.innerHTML = '<span style="color:red;">✗ 無法識別代碼</span>';
+                    previewBox.style.display = 'none';
+                }
+            } catch (err) {
+                infoEl.innerHTML = '<span style="color:#e6a700;">偵測失敗</span>';
+                previewBox.style.display = 'none';
+            }
+        }, 600);
+        document.getElementById('returnPreview').style.display = 'none';
+        document.getElementById('returnConfirmBtn').style.display = 'none';
+    }
+
+    function returnPreview() {
+        const returnCodes = document.getElementById('returnCodes').value.trim().split('\n').filter(c => c.trim() !== '').map(c => c.trim());
+        const mode = document.getElementById('returnMode').value;
+        const reason = getReturnReason();
+
+        if (returnCodes.length === 0) { alert('請輸入要退回的代碼'); return; }
+
+        let exchangeCodes = [];
+        if (mode === 'exchange') {
+            exchangeCodes = document.getElementById('exchangeCodes').value.trim().split('\n').filter(c => c.trim() !== '').map(c => c.trim());
+            if (exchangeCodes.length === 0) { alert('更換模式請輸入更換的新代碼'); return; }
+            if (exchangeCodes.length !== returnCodes.length) {
+                alert(`更換代碼數量 (${exchangeCodes.length}) 與退回代碼數量 (${returnCodes.length}) 不一致，請修正`);
+                return;
+            }
+        }
+
+        // 顯示預覽
+        document.getElementById('rpCount').innerText = returnCodes.length;
+        document.getElementById('rpMode').innerText = mode === 'exchange' ? '更換 (退回舊券 + 換發新券)' : '只退回 (標記為未使用)';
+        document.getElementById('rpReason').innerText = reason || '(未填寫)';
+        document.getElementById('rpReasonLine').style.display = reason ? 'block' : 'none';
+
+        // 退回代碼清單
+        const returnListHtml = returnCodes.slice(0, 20).map(c => `<code style="background:#fee; padding:2px 6px; border-radius:3px; margin:2px; display:inline-block; font-size:11px;">${c}</code>`).join('');
+        document.getElementById('rpReturnList').innerHTML = `<p style="font-size:12px;"><strong>退回代碼:</strong></p>${returnListHtml}${returnCodes.length > 20 ? `<span style="font-size:11px; color:#666;">...及其他 ${returnCodes.length - 20} 個</span>` : ''}`;
+
+        if (mode === 'exchange') {
+            const exchangeListHtml = exchangeCodes.slice(0, 20).map(c => `<code style="background:#efe; padding:2px 6px; border-radius:3px; margin:2px; display:inline-block; font-size:11px;">${c}</code>`).join('');
+            document.getElementById('rpExchangeList').innerHTML = `<p style="font-size:12px;"><strong>更換代碼:</strong></p>${exchangeListHtml}${exchangeCodes.length > 20 ? `<span style="font-size:11px; color:#666;">...及其他 ${exchangeCodes.length - 20} 個</span>` : ''}`;
+            document.getElementById('rpExchangeList').style.display = 'block';
+        } else {
+            document.getElementById('rpExchangeList').style.display = 'none';
+        }
+
+        document.getElementById('returnPreview').style.display = 'block';
+        document.getElementById('returnConfirmBtn').style.display = 'block';
+    }
+
+    async function returnConfirmSubmit() {
+        const returnCodes = document.getElementById('returnCodes').value.trim().split('\n').filter(c => c.trim() !== '').map(c => c.trim());
+        const mode = document.getElementById('returnMode').value;
+        const reason = getReturnReason();
+        let exchangeCodes = [];
+        if (mode === 'exchange') {
+            exchangeCodes = document.getElementById('exchangeCodes').value.trim().split('\n').filter(c => c.trim() !== '').map(c => c.trim());
+        }
+
+        if (!confirm(`確定要退回 ${returnCodes.length} 張禮券嗎？\n方式: ${mode === 'exchange' ? '更換' : '只退回'}${reason ? '\n原因: ' + reason : ''}\n\n此操作將更新 GiftStatus 及分頁資料。`)) return;
+
+        showLoading();
+        const processId = generateProcessId();
+        const startTime = new Date();
+        addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1]);
+
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'returnGift',
+                    user: currentUser,
+                    returnCodes: returnCodes,
+                    exchangeCodes: exchangeCodes,
+                    returnMode: mode,
+                    reason: reason
+                })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                updateProcessingStatus(processId, 'completed', startTime);
+                showToast(`退回完成！已處理 ${data.returnedCount} 張`);
+                loadStats();
+                // 清空表單
+                document.getElementById('returnCodes').value = '';
+                document.getElementById('exchangeCodes').value = '';
+                document.getElementById('returnReasonSelect').value = '';
+                document.getElementById('returnReasonOther').value = '';
+                document.getElementById('returnReasonOther').style.display = 'none';
+                document.getElementById('returnDetectInfo').innerHTML = '';
+                document.getElementById('returnCodeCount').innerText = '';
+                document.getElementById('exchangeDetectInfo').innerHTML = '';
+                document.getElementById('exchangePreviewBox').style.display = 'none';
+                document.getElementById('returnPreview').style.display = 'none';
+                document.getElementById('returnConfirmBtn').style.display = 'none';
+            } else {
+                throw new Error(data.message || '退回失敗');
+            }
+        } catch (err) {
+            updateProcessingStatus(processId, 'problem', startTime, err.message);
+            alert('退回失敗: ' + err.message);
+        }
+        hideLoading();
+    }
+
 </script>
 </body>
 </html>
