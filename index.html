@@ -349,6 +349,7 @@
                 document.getElementById('appPage').classList.add('active');
                 await refreshConfig();
                 await loadStats();
+                await loadTaskMonitor();
                 hideLoading();
             } else { alert('驗證失敗'); hideLoading(); }
         } catch (e) { alert('系統錯誤，請檢查 API 網址是否正確'); hideLoading(); }
@@ -1021,6 +1022,31 @@
             if (!confirm(confirmMsg)) return;
         }
 
+        // 庫存驗證：檢查所有品項的代碼是否已入庫
+        showLoading();
+        let inventoryCheckFailed = false;
+        for (const item of itemsToSubmit) {
+            try {
+                const checkRes = await fetch(`${API_URL}?action=checkInventory&codes=${encodeURIComponent(JSON.stringify(item.codes))}`);
+                const checkData = await checkRes.json();
+                if (checkData.notInInventory && checkData.notInInventory.length > 0) {
+                    hideLoading();
+                    const missing = checkData.notInInventory.slice(0, 10).join(', ');
+                    const moreText = checkData.notInInventory.length > 10 ? `...(共 ${checkData.notInInventory.length} 個)` : '';
+                    alert(`出庫失敗！品項 ${item.n + 1} 中以下代碼不在庫存中：\n${missing}${moreText}\n\n請確認代碼已入庫後再試。`);
+                    inventoryCheckFailed = true;
+                    break;
+                }
+            } catch (err) {
+                hideLoading();
+                alert(`庫存驗證失敗（品項 ${item.n + 1}）：${err.message}\n請重試。`);
+                inventoryCheckFailed = true;
+                break;
+            }
+        }
+        if (inventoryCheckFailed) return;
+        hideLoading();
+
         // 清空表單（全部品項）
         document.getElementById('useOrderNo').value = "";
         for (const n of activeIndices) {
@@ -1104,6 +1130,56 @@
         } catch (e) { /* 忽略同步失敗，不影響主流程 */ }
     }
 
+    // 從後端載入持久化的監控任務（所有用戶共享，特別是「有問題」和「處理中」的任務）
+    async function loadTaskMonitor() {
+        try {
+            const res = await fetch(`${API_URL}?action=getTaskMonitor`);
+            const tasks = await res.json();
+            if (!Array.isArray(tasks)) return;
+            // 清空現有狀態（從後端重新載入）
+            processingStatuses.problem = [];
+            processingStatuses.completed = [];
+            processingStatuses.solved = [];
+            // 保留當前 session 正在處理中的任務（不覆蓋）
+            tasks.forEach(t => {
+                const statusItem = {
+                    id: t.taskId || t.id || generateProcessId(),
+                    orderNo: t.description || t.orderNo || '',
+                    count: t.count || '-',
+                    supplier: (t.detail || '').split(' - ')[0] || t.supplier || '',
+                    gift: (t.detail || '').split(' - ')[1] || t.gift || '',
+                    startTime: t.startTime ? new Date(t.startTime) : new Date(),
+                    duration: t.elapsedSec || '0',
+                    errorMsg: t.errorMsg || '',
+                    status: t.status,
+                    codeStart: t.codeStart || '',
+                    codeEnd: t.codeEnd || '',
+                    user: t.user || ''
+                };
+                if (t.status === '有問題' || t.status === 'problem') {
+                    processingStatuses.problem.push(statusItem);
+                } else if (t.status === '處理中' || t.status === 'processing') {
+                    // 如果後端仍顯示處理中但已經過了很久，可能是異常終止，標記為問題
+                    const elapsed = (new Date() - new Date(t.startTime)) / 1000;
+                    if (elapsed > 300) { // 超過 5 分鐘仍在處理中，視為異常
+                        statusItem.status = 'problem';
+                        statusItem.errorMsg = statusItem.errorMsg || '處理逾時（可能已異常終止）';
+                        processingStatuses.problem.push(statusItem);
+                    } else {
+                        processingStatuses.processing.push(statusItem);
+                    }
+                } else if (t.status === '已完成' || t.status === 'completed') {
+                    if (processingStatuses.completed.length < 3) {
+                        processingStatuses.completed.push(statusItem);
+                    }
+                } else if (t.status === '問題已解決' || t.status === 'solved') {
+                    processingStatuses.solved.push(statusItem);
+                }
+            });
+            updateStatusDisplay();
+        } catch (e) { /* 載入失敗不影響主流程 */ }
+    }
+
     const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
     function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd) {
@@ -1116,7 +1192,8 @@
             startTime: startTime,
             status: 'processing',
             codeStart: codeStart || '',
-            codeEnd: codeEnd || ''
+            codeEnd: codeEnd || '',
+            user: currentUser || ''
         });
         updateStatusDisplay();
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
@@ -1128,7 +1205,9 @@
             count: count,
             user: currentUser,
             startTime: startTime,
-            status: '處理中'
+            status: '處理中',
+            codeStart: codeStart || '',
+            codeEnd: codeEnd || ''
         });
     }
 
@@ -1201,10 +1280,11 @@
         processingStatuses.processing.forEach(item => {
             const elapsed = ((new Date() - item.startTime) / 1000).toFixed(1);
             const codeInfo = formatCodeRange(item);
+            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
             processingList.innerHTML += `
                 <div class="status-item processing">
                     <div class="status-item-header">
-                        訂單: ${item.orderNo}
+                        訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time">${elapsed}s</span>
                     </div>
                     <div class="status-item-content">
@@ -1221,10 +1301,11 @@
         completedList.innerHTML = processingStatuses.completed.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.completed.forEach(item => {
             const codeInfo = formatCodeRange(item);
+            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
             completedList.innerHTML += `
                 <div class="status-item completed">
                     <div class="status-item-header">
-                        訂單: ${item.orderNo}
+                        訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time">${item.duration}s</span>
                     </div>
                     <div class="status-item-content">
@@ -1241,10 +1322,11 @@
         problemList.innerHTML = processingStatuses.problem.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.problem.forEach(item => {
             const codeInfo = formatCodeRange(item);
+            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
             problemList.innerHTML += `
                 <div class="status-item problem">
                     <div class="status-item-header">
-                        訂單: ${item.orderNo}
+                        訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time">${item.duration}s</span>
                     </div>
                     <div class="status-item-content">
@@ -1265,10 +1347,11 @@
         solvedList.innerHTML = processingStatuses.solved.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.solved.forEach(item => {
             const codeInfo = formatCodeRange(item);
+            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
             solvedList.innerHTML += `
                 <div class="status-item solved">
                     <div class="status-item-header">
-                        訂單: ${item.orderNo}
+                        訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time">${item.duration}s</span>
                     </div>
                     <div class="status-item-content">
