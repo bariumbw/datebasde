@@ -1572,6 +1572,11 @@
             if (regData.result === "success") {
                 hideLoading(); showToast("入庫成功並已同步分表"); 
                 document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
+                // Batch 自動遞增
+                if (regData.newBatch !== undefined) {
+                    currentBatch = regData.newBatch;
+                    document.getElementById('batchDisplay').innerText = currentBatch;
+                }
                 loadStats();
             } else { throw new Error(regData.message); }
         } catch (err) { alert("登記失敗: " + err.message); hideLoading(); }
