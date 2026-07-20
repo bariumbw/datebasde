@@ -113,6 +113,7 @@
                 <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
                 <button id="nav-usePage" class="nav-btn" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
                 <button id="nav-returnPage" class="nav-btn" onclick="switchPage('returnPage')">禮券退回</button>
+                <button id="nav-returnSupplierPage" class="nav-btn" onclick="switchPage('returnSupplierPage')">退回商戶 (出庫)</button>
                 <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
             </nav>
 
@@ -135,7 +136,9 @@
                                 <th>剩餘庫存</th>
                                 <th>未使用並已啟動</th>
                                 <th>總使用</th>
+                                <th>退回</th>
                                 <th>總入庫</th>
+                                <th>退庫</th>
                             </tr>
                         </thead>
                         <tbody id="statsTableBody"></tbody>
@@ -304,6 +307,33 @@
                 <button id="returnConfirmBtn" onclick="returnConfirmSubmit()" style="width:100%; padding:12px; margin-top:10px; background:var(--danger-red); display:none;">確認退回</button>
             </div>
 
+            <!-- 退回商戶 (出庫) -->
+            <div id="returnSupplierPage" class="page">
+                <h2>禮券退回商戶 (出庫)</h2>
+                <p style="color:#86868b; margin-bottom:15px;">把有問題的或到期的禮券退回商戶</p>
+                <div class="form-group">
+                    <label>退回代碼 (每行一個代碼)</label>
+                    <textarea id="retSupCodes" rows="5" placeholder="每行輸入一個代碼" oninput="retSupDetectCodes()"></textarea>
+                </div>
+                <div id="retSupDetectInfo" style="margin-bottom:12px; padding:10px; background:#f5f5f7; border-radius:8px; display:none;"></div>
+                <div class="form-group">
+                    <label>退回原因 (選填)</label>
+                    <select id="retSupReasonSelect" onchange="toggleRetSupReasonOther()">
+                        <option value="">請選擇</option>
+                        <option value="禮券有瑕疵">禮券有瑕疵</option>
+                        <option value="快到期">快到期</option>
+                        <option value="已停止合作">已停止合作</option>
+                        <option value="other">其他 (請填寫)</option>
+                    </select>
+                    <input type="text" id="retSupReasonOther" placeholder="請輸入退回原因" style="display:none; margin-top:8px;">
+                </div>
+                <div id="retSupPreviewBox" style="display:none; margin-top:15px; padding:15px; background:#f0f8ff; border-radius:10px; border:1px solid #b3d9ff;"></div>
+                <div style="margin-top:15px; display:flex; gap:10px;">
+                    <button onclick="retSupPreview()" style="flex:1;">預覽</button>
+                    <button onclick="retSupConfirmSubmit()" style="flex:1; background:var(--danger-red); color:white;">確認退回商戶</button>
+                </div>
+            </div>
+
             <!-- 流水帳記錄管理 -->
             <div id="recordsPage" class="page">
                 <h2>流水帳記錄管理</h2>
@@ -460,9 +490,12 @@
         const body = document.getElementById('statsTableBody');
         body.innerHTML = "";
         stats.forEach(data => {
-            const stock = data.total - data.used;
+            const retToSup = data.returnedToSupplier || 0;
+            const returned = data.returned || 0;
+            const netUsed = data.used - returned;
+            const stock = data.total - netUsed - retToSup;
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${data.supplier}</td><td>${data.giftName}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td><td style="color:var(--success-green); font-weight:bold;">${data.used}</td><td>${data.total}</td>`;
+            tr.innerHTML = `<td>${data.supplier}</td><td>${data.giftName}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td><td style="color:var(--success-green); font-weight:bold;">${netUsed}</td><td style="color:var(--danger-red); font-weight:bold;">${returned}</td><td>${data.total}</td><td style="color:#8b4513; font-weight:bold;">${retToSup}</td>`;
             body.appendChild(tr);
         });
         hideLoading();
@@ -1894,6 +1927,93 @@
             updateProcessingStatus(processId, 'problem', startTime, err.message);
             alert('退回失敗: ' + err.message);
         }
+        hideLoading();
+    }
+
+    // ===== 退回商戶 (出庫) =====
+    let retSupDetectTimer = null;
+    function retSupDetectCodes() {
+        clearTimeout(retSupDetectTimer);
+        retSupDetectTimer = setTimeout(async () => {
+            const lines = document.getElementById('retSupCodes').value.trim().split('\n').filter(l => l.trim());
+            const infoDiv = document.getElementById('retSupDetectInfo');
+            if (lines.length === 0) { infoDiv.style.display = 'none'; return; }
+            try {
+                const res = await fetch(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(lines))}`);
+                const json = await res.json();
+                const data = json.results || json;
+                if (!data || data.length === 0) { infoDiv.innerHTML = '<span style="color:red">未找到代碼</span>'; infoDiv.style.display = 'block'; return; }
+                const notFound = data.filter(d => d.notFound);
+                const found = data.filter(d => !d.notFound);
+                let html = '';
+                if (found.length > 0) {
+                    const supplier = found[0].supplier || '';
+                    const giftName = found[0].giftName || '';
+                    html += `<div style="color:var(--success-green)">✓ 已識別: ${supplier} / ${giftName}</div>`;
+                    html += `<div>系統計算數量: ${found.length} 張</div>`;
+                    const usedOnes = found.filter(d => d.usageStatus === '已使用');
+                    if (usedOnes.length > 0) {
+                        html += `<div style="color:var(--warning-orange)">⚠ 其中 ${usedOnes.length} 張已使用，退回後將標記為退庫</div>`;
+                    }
+                }
+                if (notFound.length > 0) {
+                    html += `<div style="color:red">⚠ ${notFound.length} 個代碼不在庫存中: ${notFound.map(d=>d.code).slice(0,5).join(', ')}</div>`;
+                }
+                infoDiv.innerHTML = html;
+                infoDiv.style.display = 'block';
+            } catch(e) { infoDiv.innerHTML = '<span style="color:red">偵測失敗</span>'; infoDiv.style.display = 'block'; }
+        }, 600);
+    }
+
+    function toggleRetSupReasonOther() {
+        const sel = document.getElementById('retSupReasonSelect').value;
+        document.getElementById('retSupReasonOther').style.display = sel === 'other' ? 'block' : 'none';
+    }
+
+    function getRetSupReason() {
+        const sel = document.getElementById('retSupReasonSelect').value;
+        if (sel === 'other') return document.getElementById('retSupReasonOther').value.trim();
+        return sel;
+    }
+
+    function retSupPreview() {
+        const lines = document.getElementById('retSupCodes').value.trim().split('\n').filter(l => l.trim());
+        if (lines.length === 0) { alert('請輸入退回代碼'); return; }
+        const reason = getRetSupReason();
+        const box = document.getElementById('retSupPreviewBox');
+        box.innerHTML = `<h4>預覽退回商戶</h4>
+            <p><strong>退回數量:</strong> ${lines.length} 張</p>
+            ${reason ? '<p><strong>退回原因:</strong> ' + reason + '</p>' : ''}
+            <p style="color:var(--danger-red); margin-top:10px;">確認後這些禮券將標記為「退庫」，並從庫存中出庫。</p>`;
+        box.style.display = 'block';
+    }
+
+    async function retSupConfirmSubmit() {
+        const lines = document.getElementById('retSupCodes').value.trim().split('\n').filter(l => l.trim());
+        if (lines.length === 0) { alert('請輸入退回代碼'); return; }
+        const reason = getRetSupReason();
+        if (!confirm(`確認將 ${lines.length} 張禮券退回商戶？\n此操作將標記為「退庫」並記錄日期。`)) return;
+        showLoading();
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({ mode: 'returnToSupplier', codes: lines, reason: reason, user: currentUser })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                alert(`已成功退回商戶 ${data.count} 張禮券`);
+                // 清空表單
+                document.getElementById('retSupCodes').value = '';
+                document.getElementById('retSupDetectInfo').style.display = 'none';
+                document.getElementById('retSupPreviewBox').style.display = 'none';
+                document.getElementById('retSupReasonSelect').value = '';
+                document.getElementById('retSupReasonOther').value = '';
+                document.getElementById('retSupReasonOther').style.display = 'none';
+                loadStats();
+            } else {
+                alert('退回失敗: ' + (data.message || '未知錯誤'));
+            }
+        } catch(e) { alert('退回失敗: ' + e.message); }
         hideLoading();
     }
 
