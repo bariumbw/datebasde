@@ -163,7 +163,7 @@
                             <textarea id="regCodes" oninput="calcTotal('regCodes', 'regTotal')"></textarea>
                         </div>
                         <div id="regRange">
-                            <div class="form-group"><label>首碼 (起始)</label><input type="text" id="regStart" oninput="calcTotalRange('reg')"></div>
+                            <div class="form-group"><label>首碼 (起始)</label><input type="text" id="regStart" oninput="calcTotalRange('reg')" onkeypress="if(event.key==='Enter'){event.preventDefault();document.getElementById('regEnd').focus();}"></div>
                             <div class="form-group"><label>尾碼 (結束)</label><input type="text" id="regEnd" oninput="calcTotalRange('reg')"></div>
                         </div>
                     </div>
@@ -311,6 +311,15 @@
             <div id="returnSupplierPage" class="page">
                 <h2>禮券退回商戶 (出庫)</h2>
                 <p style="color:#86868b; margin-bottom:15px;">把有問題的或到期的禮券退回商戶</p>
+                <div style="margin-bottom:15px; padding:12px; background:#fff3e0; border-radius:10px; border:1px solid #ffcc02;">
+                    <label style="font-weight:600; margin-bottom:8px; display:block;">整批退回未使用禮券</label>
+                    <p style="color:#86868b; font-size:12px; margin-bottom:8px;">該項目停止出售，將所有未使用的禮券全部退回商戶</p>
+                    <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:120px;"><label style="font-size:12px;">供應商</label><select id="retSupBulkSupplier" onchange="retSupBulkLoadItems()" style="width:100%;"><option value="">請選擇</option></select></div>
+                        <div style="flex:1; min-width:120px;"><label style="font-size:12px;">禮券項目</label><select id="retSupBulkItem" style="width:100%;"><option value="">請選擇</option></select></div>
+                        <button onclick="retSupBulkFill()" style="background:#ff9500; color:white; white-space:nowrap;">填入未使用代碼</button>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label>退回代碼 (每行一個代碼)</label>
                     <textarea id="retSupCodes" rows="5" placeholder="每行輸入一個代碼" oninput="retSupDetectCodes()"></textarea>
@@ -460,6 +469,7 @@
         document.getElementById('supplierSelect').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('useSupplierSelect').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('statSupplier').innerHTML = '<option value="">全部</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        document.getElementById('retSupBulkSupplier').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         updateStatGiftMenu();
     }
 
@@ -493,7 +503,7 @@
             const retToSup = data.returnedToSupplier || 0;
             const returned = data.returned || 0;
             const netUsed = data.used - returned;
-            const stock = data.total - netUsed - retToSup;
+            const stock = data.stock || 0;
             const tr = document.createElement('tr');
             tr.innerHTML = `<td>${data.supplier}</td><td>${data.giftName}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td><td style="color:var(--success-green); font-weight:bold;">${netUsed}</td><td style="color:var(--danger-red); font-weight:bold;">${returned}</td><td>${data.total}</td><td style="color:#8b4513; font-weight:bold;">${retToSup}</td>`;
             body.appendChild(tr);
@@ -1931,6 +1941,35 @@
     }
 
     // ===== 退回商戶 (出庫) =====
+
+    function retSupBulkLoadItems() {
+        const s = document.getElementById('retSupBulkSupplier').value;
+        const itemSel = document.getElementById('retSupBulkItem');
+        itemSel.innerHTML = '<option value="">請選擇</option>';
+        if (!s) return;
+        giftDatabase.filter(g => g.supplier === s).forEach(g => {
+            itemSel.innerHTML += `<option value="${g.name}">${g.name}</option>`;
+        });
+    }
+
+    async function retSupBulkFill() {
+        const supplier = document.getElementById('retSupBulkSupplier').value;
+        const gift = document.getElementById('retSupBulkItem').value;
+        if (!supplier || !gift) { alert('請先選擇供應商和禮券項目'); return; }
+        showLoading();
+        try {
+            const res = await fetch(`${API_URL}?action=getUnusedCodes&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}`);
+            const json = await res.json();
+            if (json.error) { alert(json.error); hideLoading(); return; }
+            const codes = json.codes || [];
+            if (codes.length === 0) { alert('該供應商/項目沒有未使用的禮券代碼'); hideLoading(); return; }
+            document.getElementById('retSupCodes').value = codes.join('\n');
+            retSupDetectCodes();
+            alert(`已填入 ${codes.length} 個未使用代碼`);
+        } catch(e) { alert('獲取代碼失敗: ' + e.message); }
+        hideLoading();
+    }
+
     let retSupDetectTimer = null;
     function retSupDetectCodes() {
         clearTimeout(retSupDetectTimer);
