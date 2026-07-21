@@ -247,6 +247,7 @@
                 <!-- 訂單號與確認按鈕獨立於品項之外，永遠顯示 -->
                 <div style="margin-top:15px;">
                     <div class="form-group"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
+                    <div id="useItemsSummary" style="display:none; margin:10px 0; padding:12px; background:#f0f8ff; border-radius:10px; border:1px solid #b3d9ff;"></div>
                     <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
                 </div>
             </div>
@@ -913,6 +914,7 @@
         itemCurrentUseCodes[n] = null;
         itemCurrentUseMatches[n] = null;
         document.getElementById('addItemBtn').disabled = false;
+        updateUseItemsSummary();
     }
 
     // 取得目前所有活躍品項索引
@@ -1164,7 +1166,7 @@
         const gift = (useEl('useGiftSelect', n) || {}).value || '';
         const previewBox = useEl('previewBox', n);
         
-        if (!supplier || !gift) { if (previewBox) previewBox.style.display = 'none'; return; }
+        if (!supplier || !gift) { if (previewBox) previewBox.style.display = 'none'; itemCurrentUseCodes[n] = null; itemCurrentUseMatches[n] = null; updateUseItemsSummary(); return; }
         
         const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
         if (!match) { if (previewBox) previewBox.style.display = 'none'; return; }
@@ -1203,6 +1205,7 @@
         itemCurrentUseCodes[n] = codes;
         // 向後相容（品項 0 同步到 window 變數）
         if (n === 0) { window.currentUseMatch = match; window.currentUseCodes = codes; }
+        updateUseItemsSummary();
         
         const pUsageStatus = useEl('pUsageStatus', n);
         const usageWarning = useEl('usageWarning', n);
@@ -1225,6 +1228,28 @@
         }
     }
     async function useAutoPreview() { await useAutoPreviewN(0); }
+
+    function updateUseItemsSummary() {
+        const summaryDiv = document.getElementById('useItemsSummary');
+        const activeIndices = getActiveItemIndices();
+        const itemMap = {}; // key: "supplier|gift" -> { supplier, gift, count }
+        for (const n of activeIndices) {
+            const match = itemCurrentUseMatches[n];
+            const codes = itemCurrentUseCodes[n];
+            if (!match || !codes || codes.length === 0) continue;
+            const key = `${match.supplier}|${match.name}`;
+            if (!itemMap[key]) itemMap[key] = { supplier: match.supplier, gift: match.name, count: 0 };
+            itemMap[key].count += codes.length;
+        }
+        const entries = Object.values(itemMap);
+        if (entries.length === 0) { summaryDiv.style.display = 'none'; return; }
+        let html = '<div style="font-weight:600; margin-bottom:8px; color:var(--primary-blue);">\u51fa\u5eab\u54c1\u9805\u6458\u8981</div>';
+        entries.forEach(e => {
+            html += `<div style="display:flex; gap:12px; padding:4px 0; border-bottom:1px solid #e8e8e8;"><span>${e.supplier}\u3000${e.gift}</span><span style="font-weight:bold; white-space:nowrap;">\u6578\u91cf: ${e.count}</span></div>`;
+        });
+        summaryDiv.innerHTML = html;
+        summaryDiv.style.display = 'block';
+    }
 
     async function useConfirmSubmit() {
         const orderNo = document.getElementById('useOrderNo').value;
@@ -1304,6 +1329,7 @@
         });
         useItemCount = 1;
         document.getElementById('addItemBtn').disabled = false;
+        updateUseItemsSummary();
 
         // 逐品項提交（各自獨立的 Task Center 條目）
         for (const item of itemsToSubmit) {
