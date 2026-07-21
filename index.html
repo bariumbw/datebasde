@@ -1100,13 +1100,15 @@
     function localDetectSupplier(code) { localDetectSupplierN(0, code); }
 
     // 明確的 calcType 對照表（不用數字大小猜測語義）：
-    // suffix_1  = 去掉尾部 1 位校驗碼（2126050002014 → 212605000201）
-    // suffix_2  = 去掉尾部 2 位校驗碼
-    // suffix_12 = 只取條碼尾部 12 位（5178039643020340 → 039643020340）
+    // suffix_1    = 去掉尾部 1 位校驗碼（2126050002014 → 212605000201）
+    // suffix_2    = 去掉尾部 2 位校驗碼
+    // suffix_12   = 只取條碼尾部 12 位（5178039643020340 → 039643020340）
+    // suffix_6_1  = 取尾部 6 位數字再去掉最後 1 位（LMCE2660000014 → 00001）
     const CALC_TYPE_TRANSFORMS = {
         'suffix_1':  { mode: 'strip', n: 1 },
         'suffix_2':  { mode: 'strip', n: 2 },
-        'suffix_12': { mode: 'take',  n: 12 }
+        'suffix_12': { mode: 'take',  n: 12 },
+        'suffix_6_1': { mode: 'take_strip', take: 6, strip: 1 }
     };
 
     function stripCodesByCalcType(codes, calcType) {
@@ -1121,6 +1123,12 @@
         // 不再只檢查 window.lastDetectInfo，因為多品項時各品項獨立
         if (t.mode === 'take') {
             return c.length > t.n ? c.substring(c.length - t.n) : c;
+        }
+        if (t.mode === 'take_strip') {
+            // 先取尾部 take 位數字，再去掉最後 strip 位
+            let result = c.length > t.take ? c.substring(c.length - t.take) : c;
+            result = result.length > t.strip ? result.substring(0, result.length - t.strip) : result;
+            return result;
         }
         return c.length > t.n ? c.substring(0, c.length - t.n) : c;
     }
