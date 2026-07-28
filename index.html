@@ -108,17 +108,17 @@
             <h2>禮券管理系統 <span id="userDisplay" style="font-size:14px; color:#86868b;"></span></h2>
             
             <nav style="margin-bottom:20px; display:flex; gap:10px; flex-wrap: wrap;">
-                <button id="nav-statsPage" class="nav-btn active" onclick="switchPage('statsPage')">庫存與使用量統計</button>
+                <button id="nav-statsPage" class="nav-btn" onclick="switchPage('statsPage')">庫存與使用量統計</button>
                 <button id="nav-regPage" class="nav-btn" onclick="switchPage('regPage')">登記新券 (入庫)</button>
                 <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
-                <button id="nav-usePage" class="nav-btn" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
+                <button id="nav-usePage" class="nav-btn active" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
                 <button id="nav-returnPage" class="nav-btn" onclick="switchPage('returnPage')">禮券退回</button>
                 <button id="nav-returnSupplierPage" class="nav-btn" onclick="switchPage('returnSupplierPage')">退回商戶 (出庫)</button>
                 <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
             </nav>
 
             <!-- 統計儀表板 -->
-            <div id="statsPage" class="page active">
+            <div id="statsPage" class="page">
                 <h2>庫存與使用量統計</h2>
                 <div class="filter-bar">
                     <div class="form-group"><label>日期(起)</label><input type="date" id="statStart" onchange="loadStats()"></div>
@@ -200,7 +200,7 @@
             </div>
 
             <!-- 禮券使用 -->
-            <div id="usePage" class="page">
+            <div id="usePage" class="page active">
                 <h2>禮券使用 (出庫)</h2>
                 <div id="useItemsContainer">
                     <!-- 品項 #1 (原始品項，ID 無後綴) -->
@@ -451,7 +451,7 @@
                 await refreshConfig();
                 hideLoading();
                 // 非阻塞載入統計和任務監控（不影響登入速度）
-                loadStats();
+                loadStats(false);
                 loadTaskMonitor();
             } else { alert('驗證失敗'); hideLoading(); }
         } catch (e) { alert('系統錯誤，請檢查 API 網址是否正確'); hideLoading(); }
@@ -490,8 +490,8 @@
         if(p === 'statsPage') loadStats();
     }
 
-    async function loadStats() {
-        showLoading();
+    async function loadStats(showLoader) {
+        if (showLoader !== false) showLoading();
         const start = document.getElementById('statStart').value;
         const end = document.getElementById('statEnd').value;
         const supplier = document.getElementById('statSupplier').value;
@@ -510,7 +510,7 @@
             tr.innerHTML = `<td>${data.supplier}</td><td>${data.giftName}</td><td style="color:var(--primary-blue); font-weight:bold;">${stock}</td><td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td><td style="color:var(--success-green); font-weight:bold;">${netUsed}</td><td style="color:var(--danger-red); font-weight:bold;">${returned}</td><td>${data.total}</td><td style="color:#8b4513; font-weight:bold;">${retToSup}</td>`;
             body.appendChild(tr);
         });
-        hideLoading();
+        if (showLoader !== false) hideLoading();
     }
 
     const actStatusCache = {}; // index -> 'act'|'unact'|'part'|'noreg'
