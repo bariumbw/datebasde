@@ -449,9 +449,10 @@
                 document.getElementById('loginPage').classList.remove('active');
                 document.getElementById('appPage').classList.add('active');
                 await refreshConfig();
-                await loadStats();
-                await loadTaskMonitor();
                 hideLoading();
+                // 非阻塞載入統計和任務監控（不影響登入速度）
+                loadStats();
+                loadTaskMonitor();
             } else { alert('驗證失敗'); hideLoading(); }
         } catch (e) { alert('系統錯誤，請檢查 API 網址是否正確'); hideLoading(); }
     }
@@ -526,15 +527,17 @@
     }
 
     async function preloadActivationStatuses() {
-        const BATCH = 5; // 同時查詢 5 筆
+        const BATCH = 3; // 同時查詢 3 筆（降低 GAS 並行壓力）
         for (let i = 0; i < recordsCache.length; i += BATCH) {
             const batch = [];
             for (let j = i; j < Math.min(i + BATCH, recordsCache.length); j++) {
                 const r = recordsCache[j];
                 if (r[9] === '已登記刪除') { actStatusCache[j] = 'del'; continue; }
+                const type = r[10] || '使用';
+                if (type === '登記' || type === '退回') { actStatusCache[j] = 'na'; continue; }
                 batch.push(fetchActStatus(r[3], r[4], j));
             }
-            await Promise.all(batch);
+            if (batch.length > 0) await Promise.all(batch);
         }
         // 全部查詢完成後重新渲染（如果有啟動狀態篩選活動中）
         const fAct = document.getElementById('filterActStatus').value;
@@ -784,6 +787,11 @@
     }
 
     async function checkActivationStatus(start, end, idx, filter) {
+        // 如果快取已有結果，直接用快取渲染，不重複查詢後端
+        if (actStatusCache[idx] !== undefined && actStatusCache[idx] !== 'unknown') {
+            renderActStatus(idx, start, end);
+            return;
+        }
         try {
             const res = await fetch(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
             const data = await res.json();
@@ -812,6 +820,19 @@
             const container = document.getElementById(`act-status-${idx}`);
             if (container) container.innerHTML = `<span style="color:#999;">查詢失敗</span>`;
         }
+    }
+
+    function renderActStatus(idx, start, end) {
+        const container = document.getElementById(`act-status-${idx}`);
+        if (!container) return;
+        const status = actStatusCache[idx];
+        if (status === 'act') container.innerHTML = `<span class="status-badge status-act">已啟動</span>`;
+        else if (status === 'unact') container.innerHTML = `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        else if (status === 'part') container.innerHTML = `<span class="status-badge status-part">部分未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        else if (status === 'noreg') container.innerHTML = `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼">查無入庫記錄</span>`;
+        else if (status === 'na') container.innerHTML = '不適用';
+        else if (status === 'del') container.innerHTML = '-';
+        else container.innerHTML = `<span style="color:#999;">讀取中...</span>`;
     }
 
     // ===== 多品項出庫系統 (Multi-Item Use) =====
