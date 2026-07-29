@@ -109,6 +109,7 @@
             
             <nav style="margin-bottom:20px; display:flex; gap:10px; flex-wrap: wrap;">
                 <button id="nav-statsPage" class="nav-btn" onclick="switchPage('statsPage')">庫存與使用量統計</button>
+                <button id="nav-brandStatsPage" class="nav-btn" onclick="switchPage('brandStatsPage')">以品牌的統計</button>
                 <button id="nav-regPage" class="nav-btn" onclick="switchPage('regPage')">登記新券 (入庫)</button>
                 <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
                 <button id="nav-usePage" class="nav-btn active" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
@@ -142,6 +143,32 @@
                             </tr>
                         </thead>
                         <tbody id="statsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 以品牌的統計 -->
+            <div id="brandStatsPage" class="page">
+                <h2>以品牌的統計</h2>
+                <div class="filter-bar">
+                    <div class="form-group"><label>品牌 (供應商)</label><select id="brandStatSupplier" onchange="updateBrandStatGiftMenu()"><option value="">請選擇</option></select></div>
+                    <div class="form-group"><label>項目</label><select id="brandStatGift"><option value="">請選擇</option></select></div>
+                    <div class="form-group"><label>日期(起)</label><input type="date" id="brandStatStart"></div>
+                    <div class="form-group"><label>日期(終)</label><input type="date" id="brandStatEnd"></div>
+                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="loadBrandStats()" style="width:100%;">查詢</button></div>
+                </div>
+                <div id="brandStatsResult" style="display:none; margin-top:15px;">
+                    <h3>統計摘要</h3>
+                    <table class="stats-table">
+                        <thead><tr><th>剩餘庫存</th><th>未使用並已啟動</th><th>總使用</th><th>門市</th><th>online</th><th>企業</th><th>快閃</th><th>禮卡展</th><th>婚展</th><th>總入庫</th><th>退回</th><th>退庫</th></tr></thead>
+                        <tbody id="brandStatsBody"></tbody>
+                    </table>
+                    <h3 style="margin-top:20px;">未使用並已啟動的代碼</h3>
+                    <div id="brandActivatedCodes" style="padding:10px; background:#f9f9f9; border-radius:8px; border:1px solid #e0e0e0; min-height:40px;"></div>
+                    <h3 style="margin-top:20px;">記錄明細</h3>
+                    <table class="stats-table">
+                        <thead><tr><th>時間</th><th>類型</th><th>訂單號</th><th>數量</th><th>購買渠道</th></tr></thead>
+                        <tbody id="brandRecordsBody"></tbody>
                     </table>
                 </div>
             </div>
@@ -246,6 +273,16 @@
                 <button id="addItemBtn" onclick="addUseItem()">＋ 新增品項</button>
                 <!-- 訂單號與確認按鈕獨立於品項之外，永遠顯示 -->
                 <div style="margin-top:15px;">
+                    <div class="form-group"><label>購買渠道 (必選)</label>
+                        <div id="useChannelGroup" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:5px;">
+                            <label style="cursor:pointer;"><input type="radio" name="useChannel" value="門市"> 門市</label>
+                            <label style="cursor:pointer;"><input type="radio" name="useChannel" value="online"> online</label>
+                            <label style="cursor:pointer;"><input type="radio" name="useChannel" value="企業"> 企業</label>
+                            <label style="cursor:pointer;"><input type="radio" name="useChannel" value="快閃"> 快閃</label>
+                            <label style="cursor:pointer;"><input type="radio" name="useChannel" value="禮卡展"> 禮卡展</label>
+                            <label style="cursor:pointer;"><input type="radio" name="useChannel" value="婚展"> 婚展</label>
+                        </div>
+                    </div>
                     <div class="form-group"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                     <div id="useItemsSummary" style="display:none; margin:10px 0; padding:12px; background:#f0f8ff; border-radius:10px; border:1px solid #b3d9ff;"></div>
                     <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
@@ -472,6 +509,7 @@
         document.getElementById('useSupplierSelect').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('statSupplier').innerHTML = '<option value="">全部</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('retSupBulkSupplier').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        document.getElementById('brandStatSupplier').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         updateStatGiftMenu();
     }
 
@@ -479,6 +517,12 @@
         const s = document.getElementById('statSupplier').value;
         const gifts = s ? giftDatabase.filter(i => i.supplier === s) : giftDatabase;
         document.getElementById('statGift').innerHTML = '<option value="">全部</option>' + gifts.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
+    }
+
+    function updateBrandStatGiftMenu() {
+        const s = document.getElementById('brandStatSupplier').value;
+        const gifts = s ? giftDatabase.filter(i => i.supplier === s) : [];
+        document.getElementById('brandStatGift').innerHTML = '<option value="">請選擇</option>' + gifts.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
     }
 
     function switchPage(p) {
@@ -511,6 +555,54 @@
             body.appendChild(tr);
         });
         if (showLoader !== false) hideLoading();
+    }
+
+    async function loadBrandStats() {
+        const supplier = document.getElementById('brandStatSupplier').value;
+        const gift = document.getElementById('brandStatGift').value;
+        if (!supplier || !gift) { alert('請選擇品牌及項目'); return; }
+        const start = document.getElementById('brandStatStart').value;
+        const end = document.getElementById('brandStatEnd').value;
+        showLoading();
+        try {
+            const url = `${API_URL}?action=getBrandStats&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}&start=${start}&end=${end}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            // 統計摘要
+            const body = document.getElementById('brandStatsBody');
+            body.innerHTML = `<tr>
+                <td style="color:var(--primary-blue); font-weight:bold;">${data.stock}</td>
+                <td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td>
+                <td style="color:var(--success-green); font-weight:bold;">${data.used}</td>
+                <td>${data.channels['門市'] || 0}</td>
+                <td>${data.channels['online'] || 0}</td>
+                <td>${data.channels['企業'] || 0}</td>
+                <td>${data.channels['快閃'] || 0}</td>
+                <td>${data.channels['禮卡展'] || 0}</td>
+                <td>${data.channels['婚展'] || 0}</td>
+                <td>${data.total}</td>
+                <td style="color:var(--danger-red); font-weight:bold;">${data.returned}</td>
+                <td style="color:#8b4513; font-weight:bold;">${data.returnedToSupplier}</td>
+            </tr>`;
+            // 未使用並已啟動的代碼
+            const codesDiv = document.getElementById('brandActivatedCodes');
+            if (data.activatedRanges && data.activatedRanges.length > 0) {
+                codesDiv.innerHTML = data.activatedRanges.map(r => r.start === r.end ? `<span style="display:inline-block; margin:3px 6px; padding:2px 8px; background:#fff3cd; border-radius:4px; font-family:monospace;">${r.start}</span>` : `<span style="display:inline-block; margin:3px 6px; padding:2px 8px; background:#fff3cd; border-radius:4px; font-family:monospace;">${r.start} - ${r.end}</span>`).join('');
+            } else {
+                codesDiv.innerHTML = '<span style="color:#999;">無</span>';
+            }
+            // 記錄明細
+            const recBody = document.getElementById('brandRecordsBody');
+            if (data.records && data.records.length > 0) {
+                recBody.innerHTML = data.records.map(r => `<tr><td>${r.time}</td><td>${r.type}</td><td>${r.orderNo}</td><td>${r.count}</td><td>${r.channel || ''}</td></tr>`).join('');
+            } else {
+                recBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">無記錄</td></tr>';
+            }
+            document.getElementById('brandStatsResult').style.display = 'block';
+        } catch (err) {
+            alert('查詢失敗: ' + err.message);
+        }
+        hideLoading();
     }
 
     const actStatusCache = {}; // index -> 'act'|'unact'|'part'|'noreg'
@@ -1273,6 +1365,9 @@
     }
 
     async function useConfirmSubmit() {
+        const channelEl = document.querySelector('input[name="useChannel"]:checked');
+        if (!channelEl) { alert('請選擇購買渠道'); return; }
+        const channel = channelEl.value;
         const orderNo = document.getElementById('useOrderNo').value;
         if (!orderNo) { alert('請填寫訂單號'); return; }
 
@@ -1324,6 +1419,7 @@
         hideLoading();
 
         // 清空表單（全部品項）
+        document.querySelectorAll('input[name="useChannel"]').forEach(r => r.checked = false);
         document.getElementById('useOrderNo').value = "";
         for (const n of activeIndices) {
             const startEl = useEl('useStart', n); if (startEl) startEl.value = '';
@@ -1368,6 +1464,7 @@
                         body: JSON.stringify({ 
                             mode: 'use', 
                             user: currentUser, 
+                            channel: channel,
                             payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
                             allCodes: codes,
                             recordInfo: {
@@ -1377,7 +1474,8 @@
                                 end: codes[codes.length-1],
                                 count: codes.length,
                                 orderNo: orderNo,
-                                expiry: expiry
+                                expiry: expiry,
+                                channel: channel
                             }
                         }) 
                     });
