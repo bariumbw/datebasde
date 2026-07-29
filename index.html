@@ -113,6 +113,7 @@
                 <button id="nav-regPage" class="nav-btn" onclick="switchPage('regPage')">登記新券 (入庫)</button>
                 <button id="nav-actPage" class="nav-btn" onclick="switchPage('actPage')">禮券啟用</button>
                 <button id="nav-usePage" class="nav-btn active" onclick="switchPage('usePage')">禮券使用 (出庫)</button>
+                <button id="nav-eGiftPage" class="nav-btn" onclick="switchPage('eGiftPage')">電子禮券</button>
                 <button id="nav-returnPage" class="nav-btn" onclick="switchPage('returnPage')">禮券退回</button>
                 <button id="nav-returnSupplierPage" class="nav-btn" onclick="switchPage('returnSupplierPage')">退回商戶 (出庫)</button>
                 <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
@@ -287,6 +288,33 @@
                     <div id="useItemsSummary" style="display:none; margin:10px 0; padding:12px; background:#f0f8ff; border-radius:10px; border:1px solid #b3d9ff;"></div>
                     <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
                 </div>
+            </div>
+
+            <!-- 電子禮券 -->
+            <div id="eGiftPage" class="page">
+                <h2>電子禮券使用登記</h2>
+                <div style="background:#f0f8ff; padding:15px; border-radius:10px; border:1px solid #b3d9ff; margin-bottom:20px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div class="form-group"><label>供應商 (必填)</label><select id="eGiftSupplier" onchange="updateEGiftGiftMenu()"><option value="">請選擇</option></select></div>
+                        <div class="form-group"><label>禮券項目 (必填)</label><select id="eGiftItem"><option value="">請選擇</option></select></div>
+                        <div class="form-group"><label>數量 (必填)</label><input type="number" id="eGiftQty" min="1" placeholder="張數"></div>
+                        <div class="form-group"><label>購買渠道 (必選)</label>
+                            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:5px;">
+                                <label style="cursor:pointer;"><input type="radio" name="eGiftChannel" value="門市"> 門市</label>
+                                <label style="cursor:pointer;"><input type="radio" name="eGiftChannel" value="online"> online</label>
+                                <label style="cursor:pointer;"><input type="radio" name="eGiftChannel" value="企業"> 企業</label>
+                                <label style="cursor:pointer;"><input type="radio" name="eGiftChannel" value="快閃"> 快閃</label>
+                                <label style="cursor:pointer;"><input type="radio" name="eGiftChannel" value="禮卡展"> 禮卡展</label>
+                                <label style="cursor:pointer;"><input type="radio" name="eGiftChannel" value="婚展"> 婚展</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:10px;"><label>填寫訂單號 (必填)</label><input type="text" id="eGiftOrderNo" placeholder="訂單號"></div>
+                    <button onclick="submitEGiftRegister()" style="width:100%; margin-top:10px; padding:10px; background:var(--primary-blue); color:white; border:none; border-radius:5px;">確認登記</button>
+                </div>
+
+                <h2>未完成的電子禮券</h2>
+                <div id="eGiftPendingList" style="margin-top:10px;"></div>
             </div>
 
             <!-- 禮券退回 -->
@@ -505,12 +533,21 @@
 
     function initDropdowns() {
         const suppliers = [...new Set(giftDatabase.map(i => i.supplier))];
+        const physicalSuppliers = [...new Set(giftDatabase.filter(i => !i.isEGift).map(i => i.supplier))];
+        const eGiftSuppliers = [...new Set(giftDatabase.filter(i => i.isEGift).map(i => i.supplier))];
         document.getElementById('supplierSelect').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
-        document.getElementById('useSupplierSelect').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        document.getElementById('useSupplierSelect').innerHTML = '<option value="">請選擇</option>' + physicalSuppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('statSupplier').innerHTML = '<option value="">全部</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('retSupBulkSupplier').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         document.getElementById('brandStatSupplier').innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        document.getElementById('eGiftSupplier').innerHTML = '<option value="">請選擇</option>' + eGiftSuppliers.map(s => `<option value="${s}">${s}</option>`).join('');
         updateStatGiftMenu();
+    }
+
+    function updateEGiftGiftMenu() {
+        const s = document.getElementById('eGiftSupplier').value;
+        const gifts = s ? giftDatabase.filter(i => i.supplier === s && i.isEGift) : [];
+        document.getElementById('eGiftItem').innerHTML = '<option value="">請選擇</option>' + gifts.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
     }
 
     function updateStatGiftMenu() {
@@ -532,6 +569,7 @@
         document.getElementById('nav-' + p).classList.add('active');
         if(p === 'recordsPage') loadRecords();
         if(p === 'statsPage') loadStats();
+        if(p === 'eGiftPage') loadEGiftPending();
     }
 
     async function loadStats(showLoader) {
@@ -959,7 +997,7 @@
         itemCurrentUseCodes.push(null);
         itemCurrentUseMatches.push(null);
 
-        const suppliers = [...new Set(giftDatabase.map(i => i.supplier))];
+        const suppliers = [...new Set(giftDatabase.filter(i => !i.isEGift).map(i => i.supplier))];
         const supplierOpts = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
 
         const html = `
@@ -1262,7 +1300,7 @@
     function useUpdateGiftSelectN(n, targetGiftName) {
         const sSelect = useEl('useSupplierSelect', n);
         const s = sSelect ? sSelect.value : '';
-        const filtered = giftDatabase.filter(i => i.supplier === s);
+        const filtered = giftDatabase.filter(i => i.supplier === s && !i.isEGift);
         const select = useEl('useGiftSelect', n);
         if (select) {
             select.innerHTML = '<option value="">請選擇</option>' + filtered.map(g => `<option value="${g.name}">${g.name}</option>`).join('');
@@ -2206,6 +2244,166 @@
                 alert('退回失敗: ' + (data.message || '未知錯誤'));
             }
         } catch(e) { alert('退回失敗: ' + e.message); }
+        hideLoading();
+    }
+
+    // ===== 電子禮券功能 =====
+    async function submitEGiftRegister() {
+        const supplier = document.getElementById('eGiftSupplier').value;
+        const gift = document.getElementById('eGiftItem').value;
+        const qty = parseInt(document.getElementById('eGiftQty').value);
+        const channelEl = document.querySelector('input[name="eGiftChannel"]:checked');
+        const orderNo = document.getElementById('eGiftOrderNo').value.trim();
+        if (!supplier) { alert('請選擇供應商'); return; }
+        if (!gift) { alert('請選擇禮券項目'); return; }
+        if (!qty || qty < 1) { alert('請填寫數量'); return; }
+        if (!channelEl) { alert('請選擇購買渠道'); return; }
+        if (!orderNo) { alert('請填寫訂單號'); return; }
+        const channel = channelEl.value;
+        // 自動從 Config 計算有效期
+        const matchItem = giftDatabase.find(g => g.supplier === supplier && g.name === gift);
+        const expiry = matchItem ? calculateExpiryDate(matchItem.rule1) : 'N/A';
+        // 轉換為「YYYY年MM月DD日」格式
+        let expiryDisplay = expiry;
+        if (expiry && expiry !== 'N/A' && expiry.includes('-')) {
+            const parts = expiry.split('-');
+            expiryDisplay = `${parts[0]}年${parseInt(parts[1])}月${parseInt(parts[2])}日`;
+        }
+        showLoading();
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'eGiftRegister',
+                    user: currentUser,
+                    supplier: supplier,
+                    gift: gift,
+                    qty: qty,
+                    channel: channel,
+                    orderNo: orderNo,
+                    expiry: expiryDisplay
+                })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast('電子禮券登記成功');
+                // 清空表單
+                document.getElementById('eGiftSupplier').value = '';
+                document.getElementById('eGiftItem').innerHTML = '<option value="">請選擇</option>';
+                document.getElementById('eGiftQty').value = '';
+                document.querySelectorAll('input[name="eGiftChannel"]').forEach(r => r.checked = false);
+                document.getElementById('eGiftOrderNo').value = '';
+                loadEGiftPending();
+            } else {
+                alert('登記失敗: ' + (data.message || '未知錯誤'));
+            }
+        } catch (err) {
+            alert('登記失敗: ' + err.message);
+        }
+        hideLoading();
+    }
+
+    async function loadEGiftPending() {
+        const container = document.getElementById('eGiftPendingList');
+        container.innerHTML = '<p style="color:#999;">載入中...</p>';
+        try {
+            const res = await fetch(`${API_URL}?action=getEGiftPending`);
+            const list = await res.json();
+            if (!list || list.length === 0) {
+                container.innerHTML = '<p style="color:#999;">無未完成的電子禮券</p>';
+                return;
+            }
+            let html = '';
+            list.forEach((item, idx) => {
+                const statusColor = item.sent ? '#28a745' : (item.made ? '#ffc107' : (item.submitted ? '#17a2b8' : '#dc3545'));
+                const statusText = item.sent ? '已完成' : (item.made ? '已製作' : (item.submitted ? '已提交' : '未提交'));
+                const submittedBtn = item.submitted
+                    ? `<span style="color:#17a2b8; font-weight:bold; font-size:12px;">✅ 已提交供應商 (${item.submittedTime})</span>`
+                    : `<button onclick="updateEGiftStatus(${item.row}, 'submitted', true)" style="padding:4px 12px; background:#17a2b8; color:white; border:none; border-radius:4px; font-size:12px;">提交給供應商</button>`;
+                html += `<div style="background:white; border:1px solid #e0e0e0; border-left:4px solid ${statusColor}; border-radius:8px; padding:12px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                        <div><strong>${item.supplier}</strong> | ${item.gift} | 訂單: ${item.orderNo} | 數量: ${item.qty} | 渠道: ${item.channel} | 有效期: ${item.expiry || 'N/A'}</div>
+                        <div style="font-size:12px; color:${statusColor}; font-weight:bold;">${statusText}</div>
+                    </div>
+                    <div style="margin-top:6px;">${submittedBtn}</div>
+                    ${!item.sent ? `<div style="margin-top:10px;">
+                        <div class="form-group"><label>電子禮券代碼 (每行一個，需 ${item.qty} 個)</label>
+                            <textarea id="eGiftCodes_${item.row}" rows="3" style="width:100%; font-family:monospace;" placeholder="每行輸入一個代碼">${item.codes || ''}</textarea>
+                        </div>
+                        <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+                            <label style="cursor:pointer;"><input type="checkbox" id="eGiftMade_${item.row}" ${item.made ? 'checked' : ''} onchange="updateEGiftStatus(${item.row}, 'made', this.checked)"> 製作電子禮券</label>
+                            <label style="cursor:pointer;"><input type="checkbox" id="eGiftSent_${item.row}" ${item.sent ? 'checked' : ''} onchange="updateEGiftStatus(${item.row}, 'sent', this.checked)"> 發出電子禮券</label>
+                            <button onclick="saveEGiftCodes(${item.row}, ${item.qty})" style="margin-left:auto; padding:5px 15px; background:var(--primary-blue); color:white; border:none; border-radius:5px;">儲存代碼</button>
+                        </div>
+                    </div>` : `<div style="margin-top:8px; font-size:12px; color:#666;">代碼: ${item.codes || '無'}</div>`}
+                </div>`;
+            });
+            container.innerHTML = html;
+        } catch (err) {
+            container.innerHTML = '<p style="color:red;">載入失敗: ' + err.message + '</p>';
+        }
+    }
+
+    async function saveEGiftCodes(row, expectedQty) {
+        const textarea = document.getElementById(`eGiftCodes_${row}`);
+        const codes = textarea.value.trim().split('\n').map(c => c.trim()).filter(c => c);
+        if (codes.length === 0) { alert('請輸入代碼'); return; }
+        if (codes.length !== expectedQty) {
+            alert(`代碼數量不符！需要 ${expectedQty} 個，目前輸入 ${codes.length} 個`);
+            return;
+        }
+        showLoading();
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'eGiftSaveCodes',
+                    row: row,
+                    codes: codes
+                })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast('代碼已儲存');
+                loadEGiftPending();
+            } else {
+                alert('儲存失敗: ' + (data.message || '未知錯誤'));
+            }
+        } catch (err) {
+            alert('儲存失敗: ' + err.message);
+        }
+        hideLoading();
+    }
+
+    async function updateEGiftStatus(row, field, checked) {
+        showLoading();
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'eGiftUpdateStatus',
+                    user: currentUser,
+                    row: row,
+                    field: field,
+                    value: checked
+                })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                if (field === 'sent' && checked) {
+                    showToast('電子禮券已完成！代碼已寫入庫存');
+                } else {
+                    showToast('狀態已更新');
+                }
+                loadEGiftPending();
+            } else {
+                alert('更新失敗: ' + (data.message || '未知錯誤'));
+                loadEGiftPending();
+            }
+        } catch (err) {
+            alert('更新失敗: ' + err.message);
+            loadEGiftPending();
+        }
         hideLoading();
     }
 
