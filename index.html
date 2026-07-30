@@ -189,6 +189,13 @@
                     </div>
                 </div>
                 <h3 id="regTotal">總張數: 0</h3>
+                <div style="margin:10px 0;">
+                    <div style="font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Report月份</div>
+                    <div style="display:inline-flex; align-items:center; gap:6px;">
+                        <select id="regReportYear" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">年份</option></select>
+                        <select id="regReportMonth" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">月份</option></select>
+                    </div>
+                </div>
                 <button id="regBtn" onclick="register()" style="width:100%; padding: 12px;">確認登記入庫</button>
             </div>
 
@@ -274,6 +281,13 @@
                     </div>
                     <div class="form-group"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                     <div id="useItemsSummary" style="display:none; margin:10px 0; padding:12px; background:#f0f8ff; border-radius:10px; border:1px solid #b3d9ff;"></div>
+                    <div style="margin:10px 0;">
+                        <div onclick="var p=document.getElementById('useReportMonthPanel'); p.style.display=p.style.display==='none'?'inline-flex':'none'; this.querySelector('.toggle-arrow').textContent=p.style.display==='none'?'▶':'▼';" style="cursor:pointer; color:#0984e3; font-size:13px; font-weight:600; user-select:none;"><span class="toggle-arrow">▶</span> Report月份</div>
+                        <div id="useReportMonthPanel" style="display:none; margin-top:4px; align-items:center; gap:6px;">
+                            <select id="useReportYear" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">年份</option></select>
+                            <select id="useReportMonth" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">月份</option></select>
+                        </div>
+                    </div>
                     <button id="finalUseBtn" onclick="useConfirmSubmit()" style="background:var(--success-green); width:100%; color:white; padding:10px; border:none; border-radius:5px;">確認使用 (正式出庫)</button>
                 </div>
             </div>
@@ -427,9 +441,22 @@
                     </select>
                     <button onclick="loadRecords()" style="font-size:12px;">刷新</button>
                     <button id="mergeToggleBtn" onclick="toggleMergeView()" style="font-size:12px; background:#6c5ce7; color:white;">合併未啟動</button>
+                    <button id="batchRptBtn" onclick="toggleBatchReportMonth()" style="font-size:12px; background:#e17055; color:white;">批量更改 Report月份</button>
+                </div>
+                <div id="batchRptPanel" style="display:none; margin:8px 0; padding:10px; background:#fff3e0; border:1px solid #ffb74d; border-radius:6px;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <label style="font-size:13px; cursor:pointer;"><input type="checkbox" id="batchRptSelectAll" onchange="batchRptToggleAll(this.checked)"> 全選</label>
+                        <span style="font-size:13px; color:#555;">已選 <strong id="batchRptCount">0</strong> 筆</span>
+                        <span style="margin-left:auto; display:inline-flex; align-items:center; gap:6px;">
+                            <select id="batchRptYear" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">年份</option></select>
+                            <select id="batchRptMonth" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">月份</option></select>
+                            <button onclick="batchRptSubmit()" style="padding:4px 12px; background:#e17055; color:white; border:none; border-radius:4px; font-size:13px; cursor:pointer;">確認更改</button>
+                            <button onclick="toggleBatchReportMonth()" style="padding:4px 12px; background:#999; color:white; border:none; border-radius:4px; font-size:13px; cursor:pointer;">取消</button>
+                        </span>
+                    </div>
                 </div>
                 <table id="recordsTable">
-                    <thead><tr>
+                    <thead><tr id="recordsTheadRow">
                         <th style="width:10%">時間</th>
                         <th style="width:6%">類型</th>
                         <th style="width:9%">供應商</th>
@@ -482,6 +509,7 @@
     
     let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
     let recordsCache = [], currentTypeFilter = "";
+    let batchRptMode = false;
 
     // 出庫處理狀態管理
     let processingStatuses = {
@@ -545,6 +573,14 @@
         let monthOpts = '<option value="">月份</option>';
         for (let m = 1; m <= 12; m++) monthOpts += `<option value="${String(m).padStart(2,'0')}">${m}月</option>`;
         document.getElementById('brandStatReportMonthSel').innerHTML = monthOpts;
+        // 出庫頁 Report月份下拉（上年、本年、下年）
+        const useRptYears = [thisYear - 1, thisYear, thisYear + 1];
+        document.getElementById('useReportYear').innerHTML = '<option value="">年份</option>' + useRptYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        document.getElementById('useReportMonth').innerHTML = monthOpts;
+        document.getElementById('regReportYear').innerHTML = '<option value="">年份</option>' + useRptYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        document.getElementById('regReportMonth').innerHTML = monthOpts;
+        document.getElementById('batchRptYear').innerHTML = '<option value="">年份</option>' + useRptYears.map(y => `<option value="${y}">${y}</option>`).join('');
+        document.getElementById('batchRptMonth').innerHTML = monthOpts;
         updateStatGiftMenu();
     }
 
@@ -657,13 +693,13 @@
                         </tr></tbody>
                     </table>
                     <div style="margin-top:10px;"><strong>未使用並已啟動的代碼：</strong> ${data.activatedRanges && data.activatedRanges.length > 0 ? data.activatedRanges.map(r => r.start === r.end ? `<span style="display:inline-block; margin:3px 6px; padding:2px 8px; background:#fff3cd; border-radius:4px; font-family:monospace;">${r.start}</span>` : `<span style="display:inline-block; margin:3px 6px; padding:2px 8px; background:#fff3cd; border-radius:4px; font-family:monospace;">${r.start} - ${r.end}</span>`).join('') : '<span style="color:#999;">無</span>'}</div>
-                    <details style="margin-top:10px;"><summary style="cursor:pointer; color:#0984e3; font-weight:bold;">記錄明細 (${data.records ? data.records.length : 0})</summary>
+                    <div style="margin-top:10px;"><div style="color:#0984e3; font-weight:bold; margin-bottom:6px;">記錄明細 (${data.records ? data.records.length : 0})</div>
                         <div style="margin:8px 0 4px; text-align:right;"><button onclick="batchEditBrandRpt('${q.supplier}','${q.gift}')" style="font-size:12px; padding:4px 10px; background:#0984e3; color:white; border:none; border-radius:4px; cursor:pointer;">批量Report月份</button></div>
                         <table class="stats-table" style="margin-top:4px;">
                             <thead><tr><th>時間</th><th>類型</th><th>訂單號</th><th>數量</th><th>購買渠道</th><th>Report月份</th></tr></thead>
                             <tbody>${data.records && data.records.length > 0 ? data.records.map((r, ri) => `<tr><td>${r.time}</td><td>${r.type}</td><td>${r.orderNo}</td><td>${r.count}</td><td>${r.channel || ''}</td><td><span id="brpt-${q.supplier}-${q.gift}-${ri}" onclick="editBrandRpt('${q.supplier}','${q.gift}',${ri},'${r.reportMonth || ''}')" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${r.reportMonth || '設定'}</span></td></tr>`).join('') : '<tr><td colspan="6" style="text-align:center; color:#999;">無記錄</td></tr>'}</tbody>
                         </table>
-                    </details>
+                    </div>
                 </div>`;
             }
             document.getElementById('brandStatsResult').innerHTML = resultHtml;
@@ -815,7 +851,8 @@
                 r[12] = reportMonth;
             }
             const reportMonthCell = isDel ? reportMonth : `<span id="rpt-${idx}" onclick="editReportMonth(${idx})" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${reportMonth || '設定'}</span>`;
-            tr.innerHTML = `<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${reportMonthCell}</td><td id="act-status-${idx}">${noActivation ? (type === '退回' ? '不適用' : '-') : '讀取中...'}</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
+            const batchChk = batchRptMode && !isDel ? `<td><input type="checkbox" class="batchRptChk" data-idx="${idx}" onchange="batchRptUpdateCount()"></td>` : (batchRptMode ? '<td></td>' : '');
+            tr.innerHTML = `${batchChk}<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${reportMonthCell}</td><td id="act-status-${idx}">${noActivation ? (type === '退回' ? '不適用' : '-') : '讀取中...'}</td><td>${!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除'}</td>`;
             body.appendChild(tr);
             if (!isDel && !noActivation) checkActivationStatus(r[3], r[4], idx);
             else if (noActivation) { actStatusCache[idx] = 'na'; }
@@ -865,6 +902,75 @@
             btn.innerText = '合併未啟動';
             renderRecords(true);
         }
+    }
+
+    function toggleBatchReportMonth() {
+        batchRptMode = !batchRptMode;
+        const panel = document.getElementById('batchRptPanel');
+        const btn = document.getElementById('batchRptBtn');
+        const theadRow = document.getElementById('recordsTheadRow');
+        if (batchRptMode) {
+            panel.style.display = 'block';
+            btn.style.background = '#d63031';
+            btn.innerText = '取消批量';
+            // Add checkbox header
+            const th = document.createElement('th');
+            th.id = 'batchChkTh';
+            th.style.width = '3%';
+            th.innerText = '☐';
+            theadRow.insertBefore(th, theadRow.firstChild);
+            renderRecords();
+        } else {
+            panel.style.display = 'none';
+            btn.style.background = '#e17055';
+            btn.innerText = '批量更改 Report月份';
+            // Remove checkbox header
+            const th = document.getElementById('batchChkTh');
+            if (th) th.remove();
+            document.getElementById('batchRptSelectAll').checked = false;
+            document.getElementById('batchRptCount').innerText = '0';
+            renderRecords();
+        }
+    }
+
+    function batchRptToggleAll(checked) {
+        document.querySelectorAll('.batchRptChk').forEach(cb => { cb.checked = checked; });
+        batchRptUpdateCount();
+    }
+
+    function batchRptUpdateCount() {
+        const count = document.querySelectorAll('.batchRptChk:checked').length;
+        document.getElementById('batchRptCount').innerText = count;
+    }
+
+    async function batchRptSubmit() {
+        const year = document.getElementById('batchRptYear').value;
+        const month = document.getElementById('batchRptMonth').value;
+        if (!year || !month) { alert('請選擇年份和月份'); return; }
+        const reportMonth = `${year}-${month}`;
+        const checked = document.querySelectorAll('.batchRptChk:checked');
+        if (checked.length === 0) { alert('請勾選至少一筆記錄'); return; }
+        const indices = Array.from(checked).map(cb => parseInt(cb.dataset.idx));
+        if (!confirm(`將 ${indices.length} 筆記錄的 Report月份更改為 ${reportMonth}，確認？`)) return;
+        showLoading();
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({ mode: 'batchUpdateReportMonth', indices: indices, reportMonth: reportMonth })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast(`已更新 ${data.count} 筆記錄的 Report月份`);
+                // Update local cache
+                indices.forEach(i => { recordsCache[i][12] = reportMonth; });
+                toggleBatchReportMonth();
+            } else {
+                alert('更新失敗: ' + (data.message || '未知錯誤'));
+            }
+        } catch (err) {
+            alert('更新失敗: ' + err.message);
+        }
+        hideLoading();
     }
 
     function renderMergeView() {
@@ -1457,6 +1563,11 @@
         const orderNo = document.getElementById('useOrderNo').value;
         if (!orderNo) { alert('請填寫訂單號'); return; }
 
+        // Report月份（選填）
+        const rptYear = document.getElementById('useReportYear').value;
+        const rptMonth = document.getElementById('useReportMonth').value;
+        const reportMonth = (rptYear && rptMonth) ? `${rptYear}-${rptMonth}` : '';
+
         const activeIndices = getActiveItemIndices();
         // 檢查每個品項是否都有有效資料
         const itemsToSubmit = [];
@@ -1507,6 +1618,9 @@
         // 清空表單（全部品項）
         document.querySelectorAll('input[name="useChannel"]').forEach(r => r.checked = false);
         document.getElementById('useOrderNo').value = "";
+        document.getElementById('useReportYear').value = '';
+        document.getElementById('useReportMonth').value = '';
+        document.getElementById('useReportMonthPanel').style.display = 'none';
         for (const n of activeIndices) {
             const startEl = useEl('useStart', n); if (startEl) startEl.value = '';
             const endEl = useEl('useEnd', n); if (endEl) endEl.value = '';
@@ -1561,7 +1675,8 @@
                                 count: codes.length,
                                 orderNo: orderNo,
                                 expiry: expiry,
-                                channel: channel
+                                channel: channel,
+                                reportMonth: reportMonth
                             }
                         }) 
                     });
@@ -1968,11 +2083,16 @@
             if (checkData.duplicates && checkData.duplicates.length > 0) {
                 hideLoading(); alert(`警告：以下代碼已入庫過，整批登記已取消！\n重複代碼：${checkData.duplicates.join(', ')}`); return;
             }
-            const regRes = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) });
+            // Report月份（選填）
+            const regRptYear = document.getElementById('regReportYear').value;
+            const regRptMonth = document.getElementById('regReportMonth').value;
+            const regReportMonth = (regRptYear && regRptMonth) ? `${regRptYear}-${regRptMonth}` : '';
+            const regRes = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, reportMonth: regReportMonth, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) });
             const regData = await regRes.json();
             if (regData.result === "success") {
                 hideLoading(); showToast("入庫成功並已同步分表"); 
                 document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
+                document.getElementById('regReportYear').value = ''; document.getElementById('regReportMonth').value = '';
                 // Batch 自動遞增
                 if (regData.newBatch !== undefined) {
                     currentBatch = regData.newBatch;
@@ -2494,12 +2614,21 @@
                     </div>
                     <div style="margin-top:6px;">${submittedBtn}</div>
                     ${!item.sent ? `<div style="margin-top:10px;">
+                        <div style="margin-bottom:8px;">
+                            <div style="font-size:13px; font-weight:600; color:#555; margin-bottom:4px;">Report月份</div>
+                            <div style="display:inline-flex; align-items:center; gap:6px;">
+                                <select id="eGiftRptYear_${item.row}" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">年份</option>${(() => { const y = new Date().getFullYear(); return [y-1,y,y+1].map(v => '<option value="'+v+'"'+(item.reportMonth && item.reportMonth.startsWith(v+'') ? ' selected' : '')+'>'+v+'</option>').join(''); })()}</select>
+                                <select id="eGiftRptMonth_${item.row}" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">月份</option>${(() => { const cm = item.reportMonth ? item.reportMonth.split('-')[1] : ''; let o=''; for(let m=1;m<=12;m++){const mv=String(m).padStart(2,'0'); o+='<option value="'+mv+'"'+(mv===cm?' selected':'')+'>'+m+'月</option>';} return o; })()}</select>
+                                <button onclick="saveEGiftReportMonth(${item.row})" style="padding:3px 10px; background:#0984e3; color:white; border:none; border-radius:4px; font-size:12px; cursor:pointer;">✔</button>
+                                ${item.reportMonth ? '<span style="font-size:12px; color:#28a745;">✓ '+item.reportMonth+'</span>' : ''}
+                            </div>
+                        </div>
                         <div class="form-group"><label>電子禮券代碼 (每行一個，需 ${item.qty} 個)</label>
                             <textarea id="eGiftCodes_${item.row}" rows="3" style="width:100%; font-family:monospace;" placeholder="每行輸入一個代碼">${item.codes || ''}</textarea>
                         </div>
                         <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
                             <label style="cursor:pointer;"><input type="checkbox" id="eGiftMade_${item.row}" ${item.made ? 'checked' : ''} onchange="updateEGiftStatus(${item.row}, 'made', this.checked)"> 製作電子禮券</label>
-                            <label style="cursor:pointer;"><input type="checkbox" id="eGiftSent_${item.row}" ${item.sent ? 'checked' : ''} onchange="updateEGiftStatus(${item.row}, 'sent', this.checked)"> 發出電子禮券</label>
+                            <label style="cursor:pointer;"><input type="checkbox" id="eGiftSent_${item.row}" ${item.sent ? 'checked' : ''} onchange="eGiftSentCheck(${item.row}, this)"> 發出電子禮券</label>
                             <button onclick="saveEGiftCodes(${item.row}, ${item.qty})" style="margin-left:auto; padding:5px 15px; background:var(--primary-blue); color:white; border:none; border-radius:5px;">儲存代碼</button>
                         </div>
                     </div>` : `<div style="margin-top:8px; font-size:12px; color:#666;">代碼: ${item.codes || '無'}</div>`}
@@ -2542,18 +2671,63 @@
         hideLoading();
     }
 
-    async function updateEGiftStatus(row, field, checked) {
+    async function saveEGiftReportMonth(row) {
+        const ry = document.getElementById(`eGiftRptYear_${row}`);
+        const rm = document.getElementById(`eGiftRptMonth_${row}`);
+        if (!ry || !rm || !ry.value || !rm.value) {
+            alert('請選擇年份和月份');
+            return;
+        }
+        const reportMonth = `${ry.value}-${rm.value}`;
         showLoading();
         try {
             const res = await fetch(API_URL, {
                 method: 'POST',
-                body: JSON.stringify({
-                    mode: 'eGiftUpdateStatus',
-                    user: currentUser,
-                    row: row,
-                    field: field,
-                    value: checked
-                })
+                body: JSON.stringify({ mode: 'eGiftSaveReportMonth', row: row, reportMonth: reportMonth })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast('Report月份已儲存');
+                loadEGiftPending();
+            } else {
+                alert('儲存失敗: ' + (data.message || '未知錯誤'));
+            }
+        } catch (err) {
+            alert('儲存失敗: ' + err.message);
+        }
+        hideLoading();
+    }
+
+    function eGiftSentCheck(row, checkbox) {
+        if (checkbox.checked) {
+            const ry = document.getElementById(`eGiftRptYear_${row}`);
+            const rm = document.getElementById(`eGiftRptMonth_${row}`);
+            if (!ry || !rm || !ry.value || !rm.value) {
+                alert('請先填寫 Report月份才能完成電子禮券');
+                checkbox.checked = false;
+                return;
+            }
+            const reportMonth = `${ry.value}-${rm.value}`;
+            updateEGiftStatus(row, 'sent', true, reportMonth);
+        } else {
+            updateEGiftStatus(row, 'sent', false, '');
+        }
+    }
+
+    async function updateEGiftStatus(row, field, checked, reportMonth) {
+        showLoading();
+        const payload = {
+            mode: 'eGiftUpdateStatus',
+            user: currentUser,
+            row: row,
+            field: field,
+            value: checked
+        };
+        if (reportMonth !== undefined && reportMonth !== '') payload.reportMonth = reportMonth;
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (data.result === 'success') {
