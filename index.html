@@ -479,7 +479,7 @@
 
     <!-- 右側狀態面板 -->
     <div class="status-panel" id="statusPanel">
-        <h3>出庫處理監控</h3>
+        <h3>處理監控</h3>
         
         <div class="status-section">
             <div class="status-section-title">處理中 <span class="status-count" id="processingCount">0</span></div>
@@ -1749,7 +1749,9 @@
                         processingStatuses.completed.push(statusItem);
                     }
                 } else if (t.status === '問題已解決' || t.status === 'solved') {
-                    processingStatuses.solved.push(statusItem);
+                    if (processingStatuses.solved.length < 1) {
+                        processingStatuses.solved.push(statusItem);
+                    }
                 }
             });
             updateStatusDisplay();
@@ -1775,7 +1777,7 @@
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
         logTaskToSheet({
             taskId: id,
-            taskType: supplier === '啟用作業' ? '啟用' : '出庫',
+            taskType: supplier === '啟用作業' ? '啟用' : (orderNo.startsWith('入庫') ? '入庫' : '出庫'),
             description: orderNo,
             detail: supplier + ' - ' + gift,
             count: count,
@@ -1938,6 +1940,8 @@
             `;
         });
         document.getElementById('solvedCount').innerText = processingStatuses.solved.length;
+
+
     }
 
     // 每秒自動更新處理中任務的經過時間
@@ -2087,19 +2091,35 @@
             const regRptYear = document.getElementById('regReportYear').value;
             const regRptMonth = document.getElementById('regReportMonth').value;
             const regReportMonth = (regRptYear && regRptMonth) ? `${regRptYear}-${regRptMonth}` : '';
-            const regRes = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, reportMonth: regReportMonth, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) });
-            const regData = await regRes.json();
-            if (regData.result === "success") {
-                hideLoading(); showToast("入庫成功並已同步分表"); 
-                document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
-                document.getElementById('regReportYear').value = ''; document.getElementById('regReportMonth').value = '';
-                // Batch 自動遞增
-                if (regData.newBatch !== undefined) {
-                    currentBatch = regData.newBatch;
-                    document.getElementById('batchDisplay').innerText = currentBatch;
-                }
-                loadStats();
-            } else { throw new Error(regData.message); }
+            // 非阻塞式處理：立即釋放 UI，背景執行登記
+            hideLoading();
+            const codeStart = codes[0] || '';
+            const codeEnd = codes[codes.length - 1] || '';
+            const regId = generateProcessId();
+            addProcessingStatus(regId, `入庫 ${s}/${g}`, codes.length, s, g, new Date(), codeStart, codeEnd);
+            // 清空表單讓用戶繼續操作
+            document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
+            document.getElementById('regReportYear').value = ''; document.getElementById('regReportMonth').value = '';
+            // 背景執行登記
+            const startTime = new Date();
+            fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, reportMonth: regReportMonth, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) })
+                .then(r => r.json())
+                .then(regData => {
+                    if (regData.result === "success") {
+                        updateProcessingStatus(regId, 'completed', startTime);
+                        showToast("入庫成功並已同步分表");
+                        if (regData.newBatch !== undefined) {
+                            currentBatch = regData.newBatch;
+                            document.getElementById('batchDisplay').innerText = currentBatch;
+                        }
+                        loadStats();
+                    } else {
+                        updateProcessingStatus(regId, 'problem', startTime, regData.message || '登記失敗');
+                    }
+                })
+                .catch(err => {
+                    updateProcessingStatus(regId, 'problem', startTime, err.message || '網路錯誤');
+                });
         } catch (err) { alert("登記失敗: " + err.message); hideLoading(); }
     }
 
