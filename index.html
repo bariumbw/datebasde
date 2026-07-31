@@ -315,8 +315,16 @@
                     <button onclick="submitEGiftRegister()" style="width:100%; margin-top:10px; padding:10px; background:var(--primary-blue); color:white; border:none; border-radius:5px;">確認登記</button>
                 </div>
 
-                <h2>未完成的電子禮券</h2>
+                <h2>未完成的電子禮券 <button onclick="loadEGiftPending()" style="font-size:13px; padding:4px 10px; margin-left:10px; border:1px solid #ccc; border-radius:6px; background:#f9f9f9; cursor:pointer;">↻ 刷新</button></h2>
                 <div id="eGiftPendingList" style="margin-top:10px;"></div>
+
+                <div style="margin-top:20px; border-top:1px solid #eee; padding-top:10px;">
+                    <h3 onclick="toggleEGiftCompleted()" style="cursor:pointer; color:#666; font-size:14px; user-select:none;">&#9654; 已完成的電子禮券</h3>
+                    <div id="eGiftCompletedPanel" style="display:none; margin-top:10px;">
+                        <div id="eGiftCompletedList"></div>
+                        <div id="eGiftCompletedPager" style="display:flex; justify-content:center; align-items:center; gap:10px; margin-top:10px;"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- 禮券退回 -->
@@ -2394,48 +2402,48 @@
 
         if (!confirm(`確定要退回 ${returnCodes.length} 張禮券嗎？\n方式: ${mode === 'exchange' ? '更換' : '只退回'}${reason ? '\n原因: ' + reason : ''}\n\n此操作將更新 GiftStatus 及分頁資料。`)) return;
 
-        showLoading();
+        // 非阻塞式處理：立即釋放 UI
         const processId = generateProcessId();
         const startTime = new Date();
         addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1]);
+        // 清空表單讓用戶繼續操作
+        document.getElementById('returnCodes').value = '';
+        document.getElementById('exchangeCodes').value = '';
+        document.getElementById('returnReasonSelect').value = '';
+        document.getElementById('returnReasonOther').value = '';
+        document.getElementById('returnReasonOther').style.display = 'none';
+        document.getElementById('returnDetectInfo').innerHTML = '';
+        document.getElementById('returnCodeCount').innerText = '';
+        document.getElementById('exchangeDetectInfo').innerHTML = '';
+        document.getElementById('exchangePreviewBox').style.display = 'none';
+        document.getElementById('returnPreview').style.display = 'none';
+        document.getElementById('returnConfirmBtn').style.display = 'none';
 
-        try {
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({
-                    mode: 'returnGift',
-                    user: currentUser,
-                    returnCodes: returnCodes,
-                    exchangeCodes: exchangeCodes,
-                    returnMode: mode,
-                    reason: reason
-                })
-            });
-            const data = await res.json();
+        // 背景執行退回
+        fetch(API_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                mode: 'returnGift',
+                user: currentUser,
+                returnCodes: returnCodes,
+                exchangeCodes: exchangeCodes,
+                returnMode: mode,
+                reason: reason
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
             if (data.result === 'success') {
                 updateProcessingStatus(processId, 'completed', startTime);
                 showToast(`退回完成！已處理 ${data.returnedCount} 張`);
                 loadStats();
-                // 清空表單
-                document.getElementById('returnCodes').value = '';
-                document.getElementById('exchangeCodes').value = '';
-                document.getElementById('returnReasonSelect').value = '';
-                document.getElementById('returnReasonOther').value = '';
-                document.getElementById('returnReasonOther').style.display = 'none';
-                document.getElementById('returnDetectInfo').innerHTML = '';
-                document.getElementById('returnCodeCount').innerText = '';
-                document.getElementById('exchangeDetectInfo').innerHTML = '';
-                document.getElementById('exchangePreviewBox').style.display = 'none';
-                document.getElementById('returnPreview').style.display = 'none';
-                document.getElementById('returnConfirmBtn').style.display = 'none';
             } else {
-                throw new Error(data.message || '退回失敗');
+                updateProcessingStatus(processId, 'problem', startTime, data.message || '退回失敗');
             }
-        } catch (err) {
-            updateProcessingStatus(processId, 'problem', startTime, err.message);
-            alert('退回失敗: ' + err.message);
-        }
-        hideLoading();
+        })
+        .catch(err => {
+            updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
+        });
     }
 
     // ===== 退回商戶 (出庫) =====
@@ -2617,7 +2625,7 @@
             const res = await fetch(`${API_URL}?action=getEGiftPending`);
             const list = await res.json();
             if (!list || list.length === 0) {
-                container.innerHTML = '<p style="color:#999;">無未完成的電子禮券</p>';
+                container.innerHTML = '<div style="text-align:center; padding:30px; color:#999; font-size:14px; border:1px dashed #ddd; border-radius:8px; margin-top:10px;">沒有未完成的電子禮券</div>';
                 return;
             }
             let html = '';
@@ -2691,6 +2699,77 @@
         hideLoading();
     }
 
+    // ===== 已完成的電子禮券 =====
+    let eGiftCompletedData = [];
+    let eGiftCompletedPage = 1;
+    const eGiftCompletedPerPage = 3;
+    let eGiftCompletedOpen = false;
+
+    function toggleEGiftCompleted() {
+        eGiftCompletedOpen = !eGiftCompletedOpen;
+        const panel = document.getElementById('eGiftCompletedPanel');
+        const header = panel.previousElementSibling;
+        if (eGiftCompletedOpen) {
+            panel.style.display = 'block';
+            header.innerHTML = '&#9660; 已完成的電子禮券';
+            loadEGiftCompleted();
+        } else {
+            panel.style.display = 'none';
+            header.innerHTML = '&#9654; 已完成的電子禮券';
+        }
+    }
+
+    async function loadEGiftCompleted() {
+        const container = document.getElementById('eGiftCompletedList');
+        container.innerHTML = '<p style="color:#999;">載入中...</p>';
+        try {
+            const res = await fetch(`${API_URL}?action=getEGiftCompleted`);
+            const list = await res.json();
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:20px; color:#999; font-size:13px;">沒有已完成的電子禮券</div>';
+                document.getElementById('eGiftCompletedPager').innerHTML = '';
+                return;
+            }
+            eGiftCompletedData = list;
+            eGiftCompletedPage = 1;
+            renderEGiftCompleted();
+        } catch (err) {
+            container.innerHTML = '<p style="color:red;">載入失敗: ' + err.message + '</p>';
+        }
+    }
+
+    function renderEGiftCompleted() {
+        const container = document.getElementById('eGiftCompletedList');
+        const totalPages = Math.ceil(eGiftCompletedData.length / eGiftCompletedPerPage);
+        const start = (eGiftCompletedPage - 1) * eGiftCompletedPerPage;
+        const pageItems = eGiftCompletedData.slice(start, start + eGiftCompletedPerPage);
+        let html = '';
+        pageItems.forEach(item => {
+            html += `<div style="background:#f9fff9; border:1px solid #d4edda; border-left:4px solid #28a745; border-radius:8px; padding:10px; margin-bottom:8px; font-size:13px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div><strong>${item.supplier}</strong> | ${item.gift} | 訂單: ${item.orderNo} | 數量: ${item.qty} | 渠道: ${item.channel}</div>
+                    <span style="color:#28a745; font-weight:bold; font-size:12px;">已完成</span>
+                </div>
+                <div style="margin-top:4px; color:#666; font-size:12px;">時間: ${item.time} | 有效期: ${item.expiry || 'N/A'}${item.reportMonth ? ' | Report: ' + item.reportMonth : ''}</div>
+            </div>`;
+        });
+        container.innerHTML = html;
+        // 分頁器
+        const pager = document.getElementById('eGiftCompletedPager');
+        if (totalPages <= 1) { pager.innerHTML = ''; return; }
+        let pagerHtml = `<button onclick="eGiftCompletedGoPage(${eGiftCompletedPage - 1})" ${eGiftCompletedPage <= 1 ? 'disabled' : ''} style="padding:4px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer;">上一頁</button>`;
+        pagerHtml += `<span style="font-size:13px; color:#666;">${eGiftCompletedPage} / ${totalPages}</span>`;
+        pagerHtml += `<button onclick="eGiftCompletedGoPage(${eGiftCompletedPage + 1})" ${eGiftCompletedPage >= totalPages ? 'disabled' : ''} style="padding:4px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer;">下一頁</button>`;
+        pager.innerHTML = pagerHtml;
+    }
+
+    function eGiftCompletedGoPage(page) {
+        const totalPages = Math.ceil(eGiftCompletedData.length / eGiftCompletedPerPage);
+        if (page < 1 || page > totalPages) return;
+        eGiftCompletedPage = page;
+        renderEGiftCompleted();
+    }
+
     async function saveEGiftReportMonth(row) {
         const ry = document.getElementById(`eGiftRptYear_${row}`);
         const rm = document.getElementById(`eGiftRptMonth_${row}`);
@@ -2735,7 +2814,6 @@
     }
 
     async function updateEGiftStatus(row, field, checked, reportMonth) {
-        showLoading();
         const payload = {
             mode: 'eGiftUpdateStatus',
             user: currentUser,
@@ -2744,6 +2822,33 @@
             value: checked
         };
         if (reportMonth !== undefined && reportMonth !== '') payload.reportMonth = reportMonth;
+
+        // 對於 sent=true（發出電子禮券），使用非阻塞式處理
+        if (field === 'sent' && checked) {
+            const processId = generateProcessId();
+            const startTime = new Date();
+            addProcessingStatus(processId, `電子禮券發出 (row ${row})`, 1, '電子禮券', '', startTime, '', '');
+            fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.result === 'success') {
+                        updateProcessingStatus(processId, 'completed', startTime);
+                        showToast('電子禮券已完成！代碼已寫入庫存');
+                        loadEGiftPending();
+                    } else {
+                        updateProcessingStatus(processId, 'problem', startTime, data.message || '發出失敗');
+                        loadEGiftPending();
+                    }
+                })
+                .catch(err => {
+                    updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
+                    loadEGiftPending();
+                });
+            return;
+        }
+
+        // 其他欄位更新（submitted, made）仍用原來的方式
+        showLoading();
         try {
             const res = await fetch(API_URL, {
                 method: 'POST',
@@ -2751,11 +2856,7 @@
             });
             const data = await res.json();
             if (data.result === 'success') {
-                if (field === 'sent' && checked) {
-                    showToast('電子禮券已完成！代碼已寫入庫存');
-                } else {
-                    showToast('狀態已更新');
-                }
+                showToast('狀態已更新');
                 loadEGiftPending();
             } else {
                 alert('更新失敗: ' + (data.message || '未知錯誤'));
