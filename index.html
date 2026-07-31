@@ -21,7 +21,9 @@
     body { background-color: var(--soft-bg); padding: 20px; display: flex; justify-content: center; min-height: 100vh; color: var(--text-color); }
     .main-wrapper { width: 100%; display: block; padding-right: calc(25vw + 10px); }
     .container { width: 100%; margin: 0 auto; background: #fff; padding: 25px; border-radius: 16px; box-shadow: 0 4px 15px rgba(255,183,197,0.3); }
-    .status-panel { position: fixed; top: 0; right: 0; width: 25vw; height: 100vh; background: #fff; padding: 20px; border-radius: 16px 0 0 16px; box-shadow: -4px 0 15px rgba(255,183,197,0.4); overflow-y: auto; z-index: 500; border-left: 2px solid var(--primary-pink); }
+    .status-panel { position: fixed; top: 0; right: 0; width: 25vw; height: 100vh; background: #fff; padding: 15px; border-radius: 16px 0 0 16px; box-shadow: -4px 0 15px rgba(255,183,197,0.4); overflow: hidden; z-index: 500; border-left: 2px solid var(--primary-pink); display: flex; flex-direction: column; }
+    .status-panel-upper { flex: 1; overflow-y: auto; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }
+    .status-panel-lower { flex: 1; overflow-y: auto; }
     .page { display: none; }
     .page.active { display: block; }
     .reg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -489,24 +491,28 @@
     <div class="status-panel" id="statusPanel">
         <h3>處理監控</h3>
         
-        <div class="status-section">
-            <div class="status-section-title">處理中 <span class="status-count" id="processingCount">0</span></div>
-            <div id="processingList"></div>
+        <div class="status-panel-upper">
+            <div class="status-section">
+                <div class="status-section-title">處理中 <span class="status-count" id="processingCount">0</span></div>
+                <div id="processingList"></div>
+            </div>
         </div>
 
-        <div class="status-section">
-            <div class="status-section-title">已完成 (最近3個) <span class="status-count" id="completedCount">0</span></div>
-            <div id="completedList"></div>
-        </div>
+        <div class="status-panel-lower">
+            <div class="status-section">
+                <div class="status-section-title">已完成 (最近3個) <span class="status-count" id="completedCount">0</span></div>
+                <div id="completedList"></div>
+            </div>
 
-        <div class="status-section">
-            <div class="status-section-title">有問題 <span class="status-count" id="problemCount">0</span></div>
-            <div id="problemList"></div>
-        </div>
+            <div class="status-section">
+                <div class="status-section-title">有問題 <span class="status-count" id="problemCount">0</span></div>
+                <div id="problemList"></div>
+            </div>
 
-        <div class="status-section">
-            <div class="status-section-title">問題已解決 (最近1個) <span class="status-count" id="solvedCount">0</span></div>
-            <div id="solvedList"></div>
+            <div class="status-section">
+                <div class="status-section-title">問題已解決 (最近1個) <span class="status-count" id="solvedCount">0</span></div>
+                <div id="solvedList"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -2207,16 +2213,33 @@
         var m = document.getElementById('actMode').value;
         var codes = (m === 'list') ? document.getElementById('actCodes').value.trim().split('\n').map(c => c.trim()).filter(c => c !== "") : getRangeCodes(document.getElementById('actStart').value.trim(), document.getElementById('actEnd').value.trim());
         if (codes.length === 0) { alert('\u8acb\u8f38\u5165\u4ee3\u78bc'); return; }
-        showLoading();
-        await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activate', payload: codes }) });
-        hideLoading(); showToast("\u555f\u7528\u5b8c\u6210");
-        // \u6e05\u7a7a\u9801\u9762
+        if (!confirm(`\u78ba\u5b9a\u8981\u555f\u7528 ${codes.length} \u5f35\u79ae\u5238\u55ce\uff1f`)) return;
+
+        // \u975e\u963b\u585e\u5f0f\u8655\u7406 - \u7acb\u5373\u6e05\u7a7a\u8868\u55ae\uff0c\u80cc\u666f\u57f7\u884c
+        const processId = generateProcessId();
+        const startTime = new Date();
+        const startCode = codes[0] || '';
+        const endCode = codes[codes.length - 1] || '';
+        addProcessingStatus(processId, `\u555f\u7528 ${startCode}~${endCode}`, codes.length, '\u555f\u7528\u4f5c\u696d', '\u79ae\u5238\u555f\u7528', startTime, startCode, endCode);
+
+        // \u6e05\u7a7a\u9801\u9762\uff0c\u8b93\u7528\u6236\u7e7c\u7e8c\u64cd\u4f5c
         document.getElementById('actStart').value = '';
         document.getElementById('actEnd').value = '';
         document.getElementById('actCodes').value = '';
         document.getElementById('actTotal').innerText = '\u7e3d\u5f35\u6578: 0';
         document.getElementById('actDetectStatus').innerText = '';
-        loadStats();
+        showToast('\u555f\u7528\u4efb\u52d9\u5df2\u63d0\u4ea4\uff0c\u8acb\u67e5\u770b\u8655\u7406\u76e3\u63a7');
+
+        // \u80cc\u666f\u57f7\u884c
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activate', payload: codes }) });
+            const data = await res.json().catch(() => ({}));
+            if (data && data.result && data.result !== 'success') throw new Error(data.message || '\u555f\u7528\u5931\u6557');
+            updateProcessingStatus(processId, 'completed', startTime);
+            loadStats(false);
+        } catch (err) {
+            updateProcessingStatus(processId, 'problem', startTime, err.message || '\u555f\u7528\u5931\u6557');
+        }
     }
 
     async function activateRange(start, end, idx) {
@@ -2255,7 +2278,7 @@
     function toggleActMode(m) { document.getElementById('actList').style.display = (m === 'list') ? 'block' : 'none'; document.getElementById('actRange').style.display = (m === 'range') ? 'block' : 'none'; }
     function toggleUseMode(m) { toggleUseModeN(0, m); }
     function updateGiftMenu() { var s = document.getElementById('supplierSelect').value; var g = document.getElementById('giftSelect'); g.innerHTML = '<option value="">請選擇</option>'; giftDatabase.filter(r => r.supplier === s).forEach(r => { var opt = document.createElement('option'); opt.value = r.name; opt.text = r.name; g.appendChild(opt); }); }
-    function calculateExpiryDate(rule) { if (!rule || rule === 'N/A') return 'N/A'; if (rule.includes('m_end')) { const months = parseInt(rule); const date = new Date(); date.setMonth(date.getMonth() + months + 1); date.setDate(0); return date.toISOString().split('T')[0]; } return rule; }
+    function calculateExpiryDate(rule) { if (!rule || rule === 'N/A') return 'N/A'; if (rule.includes('m_end')) { const months = parseInt(rule); const date = new Date(); date.setDate(1); date.setMonth(date.getMonth() + months + 1); date.setDate(0); return date.toISOString().split('T')[0]; } return rule; }
     // 範圍展開安全上限：防止掃描器輸入途中（代碼不完整）時首尾碼差距巨大，展開出百萬級陣列導致頁面卡死
     const MAX_RANGE_CODES = 10000;
     function getRangeCodes(start, end) {
