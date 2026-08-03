@@ -198,6 +198,12 @@
                         <select id="regReportMonth" style="padding:4px 6px; border-radius:4px; border:1px solid #ccc; font-size:13px;"><option value="">月份</option></select>
                     </div>
                 </div>
+                <div style="margin:10px 0;">
+                    <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                        <input type="checkbox" id="regActivated" style="width:auto; margin:0;">
+                        <span>已啟動（入庫時已為已啟動狀態）</span>
+                    </label>
+                </div>
                 <button id="regBtn" onclick="register()" style="width:100%; padding: 12px;">確認登記入庫</button>
             </div>
 
@@ -2144,6 +2150,8 @@
             const regRptYear = document.getElementById('regReportYear').value;
             const regRptMonth = document.getElementById('regReportMonth').value;
             const regReportMonth = (regRptYear && regRptMonth) ? `${regRptYear}-${regRptMonth}` : '';
+            // 已啟動勾選
+            const regActivated = document.getElementById('regActivated').checked;
             // 非阻塞式處理：立即釋放 UI，背景執行登記
             hideLoading();
             const codeStart = codes[0] || '';
@@ -2153,9 +2161,10 @@
             // 清空表單讓用戶繼續操作
             document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
             document.getElementById('regReportYear').value = ''; document.getElementById('regReportMonth').value = '';
+            document.getElementById('regActivated').checked = false;
             // 背景執行登記
             const startTime = new Date();
-            fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, reportMonth: regReportMonth, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) })
+            fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, reportMonth: regReportMonth, activated: regActivated, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) })
                 .then(r => r.json())
                 .then(regData => {
                     if (regData.result === "success") {
