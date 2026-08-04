@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
@@ -558,9 +558,9 @@
                 document.getElementById('loginPage').classList.remove('active');
                 document.getElementById('appPage').classList.add('active');
                 applyRolePermissions();
-                await refreshConfig();
                 hideLoading();
-                // 非阻塞載入統計和任務監控（不影響登入速度）
+                // 非阻塞載入配置、統計和任務監控（不影響登入速度）
+                refreshConfig();
                 loadStats(false);
                 loadTaskMonitor();
             } else { alert('驗證失敗'); hideLoading(); }
@@ -594,13 +594,30 @@
         }
     }
 
-    async function refreshConfig() {
-        const configRes = await fetch(`${API_URL}?action=getConfig`);
-        giftDatabase = await configRes.json();
-        const batchRes = await fetch(`${API_URL}?action=getBatch`);
-        currentBatch = (await batchRes.json()).batch;
-        document.getElementById('batchDisplay').innerText = currentBatch;
-        initDropdowns();
+    async function refreshConfig(retryCount) {
+        retryCount = retryCount || 0;
+        try {
+            const configRes = await fetch(`${API_URL}?action=getConfig`);
+            if (!configRes.ok) throw new Error('getConfig HTTP ' + configRes.status);
+            giftDatabase = await configRes.json();
+            initDropdowns();
+        } catch (e) {
+            console.error('refreshConfig getConfig failed:', e);
+            if (retryCount < 2) {
+                setTimeout(() => refreshConfig(retryCount + 1), 3000);
+                return;
+            } else {
+                showToast('載入配置失敗，請重新整理頁面');
+            }
+        }
+        try {
+            const batchRes = await fetch(`${API_URL}?action=getBatch`);
+            if (!batchRes.ok) throw new Error('getBatch HTTP ' + batchRes.status);
+            currentBatch = (await batchRes.json()).batch;
+            document.getElementById('batchDisplay').innerText = currentBatch;
+        } catch (e) {
+            console.error('refreshConfig getBatch failed:', e);
+        }
     }
 
     function initDropdowns() {
@@ -1713,31 +1730,32 @@
             const expiry = calculateExpiryDate(match.rule1);
             const processId = generateProcessId();
             const startTime = new Date();
-            addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1]);
+            const usePayload = { 
+                mode: 'use', 
+                user: currentUser, 
+                channel: channel,
+                payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
+                allCodes: codes,
+                recordInfo: {
+                    supplier: match.supplier,
+                    gift: match.name,
+                    start: codes[0],
+                    end: codes[codes.length-1],
+                    count: codes.length,
+                    orderNo: orderNo,
+                    expiry: expiry,
+                    channel: channel,
+                    reportMonth: reportMonth
+                }
+            };
+            addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1], usePayload);
 
             // 非同步提交（不阻擋下一個品項的提交）
             (async () => {
                 try {
                     const res = await fetch(API_URL, { 
                         method: "POST", 
-                        body: JSON.stringify({ 
-                            mode: 'use', 
-                            user: currentUser, 
-                            channel: channel,
-                            payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
-                            allCodes: codes,
-                            recordInfo: {
-                                supplier: match.supplier,
-                                gift: match.name,
-                                start: codes[0],
-                                end: codes[codes.length-1],
-                                count: codes.length,
-                                orderNo: orderNo,
-                                expiry: expiry,
-                                channel: channel,
-                                reportMonth: reportMonth
-                            }
-                        }) 
+                        body: JSON.stringify(usePayload) 
                     });
                     const data = await res.json();
                     if (data.result === "success") {
@@ -1819,7 +1837,7 @@
 
     const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
-    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd) {
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload) {
         processingStatuses.processing.push({
             id: id,
             orderNo: orderNo,
@@ -1830,7 +1848,8 @@
             status: 'processing',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
-            user: currentUser || ''
+            user: currentUser || '',
+            retryPayload: retryPayload || null
         });
         updateStatusDisplay();
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
@@ -1866,7 +1885,8 @@
             errorMsg: errorMsg,
             status: newStatus,
             codeStart: item.codeStart || '',
-            codeEnd: item.codeEnd || ''
+            codeEnd: item.codeEnd || '',
+            retryPayload: item.retryPayload || null
         };
 
         if (newStatus === 'completed') {
@@ -1899,6 +1919,34 @@
             processingStatuses.processing.push(problem);
             updateProcessingStatus(id, 'solved', problem.startTime, problem.errorMsg || '');
         }
+    }
+
+    function retryTask(id) {
+        const problem = processingStatuses.problem.find(p => p.id === id);
+        if (!problem || !problem.retryPayload) { alert('無法重試：缺少任務資料'); return; }
+        if (!confirm(`確定要重試任務「${problem.orderNo}」嗎？`)) return;
+
+        // 從 problem 移除，建立新的 processing 項目
+        processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
+        const newId = generateProcessId();
+        const startTime = new Date();
+        addProcessingStatus(newId, problem.orderNo, problem.count, problem.supplier, problem.gift, startTime, problem.codeStart, problem.codeEnd, problem.retryPayload);
+
+        // 重新發送請求
+        fetch(API_URL, { method: 'POST', body: JSON.stringify(problem.retryPayload) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    updateProcessingStatus(newId, 'completed', startTime);
+                    showToast('重試成功！');
+                    loadStats();
+                } else {
+                    updateProcessingStatus(newId, 'problem', startTime, data.message || '重試失敗');
+                }
+            })
+            .catch(err => {
+                updateProcessingStatus(newId, 'problem', startTime, err.message || '網路錯誤');
+            });
     }
 
     function formatCodeRange(item) {
@@ -1973,7 +2021,10 @@
                     <div class="status-item-problems">
                         <strong>問題:</strong> ${item.errorMsg}
                     </div>
-                    <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">標記已解決</button>
+                    <div style="display:flex; gap:6px; margin-top:6px;">
+                        ${item.retryPayload ? `<button class="clear-btn" style="background:#2563eb; color:#fff; border:none;" onclick="retryTask('${item.id}')">重試</button>` : ''}
+                        <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">標記已解決</button>
+                    </div>
                 </div>
             `;
         });
@@ -2157,14 +2208,15 @@
             const codeStart = codes[0] || '';
             const codeEnd = codes[codes.length - 1] || '';
             const regId = generateProcessId();
-            addProcessingStatus(regId, `入庫 ${s}/${g}`, codes.length, s, g, new Date(), codeStart, codeEnd);
+            const regPayload = { mode: 'register', user: currentUser, reportMonth: regReportMonth, activated: regActivated, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) };
+            addProcessingStatus(regId, `入庫 ${s}/${g}`, codes.length, s, g, new Date(), codeStart, codeEnd, regPayload);
             // 清空表單讓用戶繼續操作
             document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
             document.getElementById('regReportYear').value = ''; document.getElementById('regReportMonth').value = '';
             document.getElementById('regActivated').checked = false;
             // 背景執行登記
             const startTime = new Date();
-            fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'register', user: currentUser, reportMonth: regReportMonth, activated: regActivated, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) }) })
+            fetch(API_URL, { method: "POST", body: JSON.stringify(regPayload) })
                 .then(r => r.json())
                 .then(regData => {
                     if (regData.result === "success") {
@@ -2229,7 +2281,8 @@
         const startTime = new Date();
         const startCode = codes[0] || '';
         const endCode = codes[codes.length - 1] || '';
-        addProcessingStatus(processId, `\u555f\u7528 ${startCode}~${endCode}`, codes.length, '\u555f\u7528\u4f5c\u696d', '\u79ae\u5238\u555f\u7528', startTime, startCode, endCode);
+        const actPayload = { mode: 'activate', payload: codes };
+        addProcessingStatus(processId, `\u555f\u7528 ${startCode}~${endCode}`, codes.length, '\u555f\u7528\u4f5c\u696d', '\u79ae\u5238\u555f\u7528', startTime, startCode, endCode, actPayload);
 
         // \u6e05\u7a7a\u9801\u9762\uff0c\u8b93\u7528\u6236\u7e7c\u7e8c\u64cd\u4f5c
         document.getElementById('actStart').value = '';
@@ -2241,7 +2294,7 @@
 
         // \u80cc\u666f\u57f7\u884c
         try {
-            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activate', payload: codes }) });
+            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(actPayload) });
             const data = await res.json().catch(() => ({}));
             if (data && data.result && data.result !== 'success') throw new Error(data.message || '\u555f\u7528\u5931\u6557');
             updateProcessingStatus(processId, 'completed', startTime);
@@ -2258,14 +2311,15 @@
         const processId = generateProcessId();
         const startTime = new Date();
         const codes = getRangeCodes(start, end);
-        addProcessingStatus(processId, `啟用 ${start}~${end}`, codes.length || '-', '啟用作業', '範圍啟動', startTime, start, end);
+        const actRangePayload = { mode: 'activateRange', start: start, end: end };
+        addProcessingStatus(processId, `啟用 ${start}~${end}`, codes.length || '-', '啟用作業', '範圍啟動', startTime, start, end, actRangePayload);
 
         // 標示該列狀態為啟用中
         const cell = document.getElementById(`act-status-${idx}`);
         if (cell) cell.innerHTML = `<span class="status-badge status-part">啟用中...</span>`;
 
         try {
-            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ mode: 'activateRange', start: start, end: end }) });
+            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(actRangePayload) });
             const data = await res.json().catch(() => ({}));
             if (data && data.result && data.result !== "success") throw new Error(data.message || "啟用失敗");
             updateProcessingStatus(processId, 'completed', startTime);
@@ -2476,7 +2530,15 @@
         // 非阻塞式處理：立即釋放 UI
         const processId = generateProcessId();
         const startTime = new Date();
-        addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1]);
+        const returnPayload = {
+            mode: 'returnGift',
+            user: currentUser,
+            returnCodes: returnCodes,
+            exchangeCodes: exchangeCodes,
+            returnMode: mode,
+            reason: reason
+        };
+        addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1], returnPayload);
         // 清空表單讓用戶繼續操作
         document.getElementById('returnCodes').value = '';
         document.getElementById('exchangeCodes').value = '';
@@ -2493,14 +2555,7 @@
         // 背景執行退回
         fetch(API_URL, {
             method: 'POST',
-            body: JSON.stringify({
-                mode: 'returnGift',
-                user: currentUser,
-                returnCodes: returnCodes,
-                exchangeCodes: exchangeCodes,
-                returnMode: mode,
-                reason: reason
-            })
+            body: JSON.stringify(returnPayload)
         })
         .then(r => r.json())
         .then(data => {
@@ -2609,28 +2664,37 @@
         if (lines.length === 0) { alert('請輸入退回代碼'); return; }
         const reason = getRetSupReason();
         if (!confirm(`確認將 ${lines.length} 張禮券退回商戶？\n此操作將標記為「退庫」並記錄日期。`)) return;
-        showLoading();
-        try {
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ mode: 'returnToSupplier', codes: lines, reason: reason, user: currentUser })
+
+        // 非阻塞式處理
+        const processId = generateProcessId();
+        const startTime = new Date();
+        const retSupPayload = { mode: 'returnToSupplier', codes: lines, reason: reason, user: currentUser };
+        addProcessingStatus(processId, '退回商戶' + (reason ? '-' + reason : ''), lines.length, '', '', startTime, lines[0], lines[lines.length - 1], retSupPayload);
+
+        // 清空表單讓用戶繼續操作
+        document.getElementById('retSupCodes').value = '';
+        document.getElementById('retSupDetectInfo').style.display = 'none';
+        document.getElementById('retSupPreviewBox').style.display = 'none';
+        document.getElementById('retSupReasonSelect').value = '';
+        document.getElementById('retSupReasonOther').value = '';
+        document.getElementById('retSupReasonOther').style.display = 'none';
+        showToast('退回商戶任務已提交');
+
+        // 背景執行
+        fetch(API_URL, { method: 'POST', body: JSON.stringify(retSupPayload) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    updateProcessingStatus(processId, 'completed', startTime);
+                    showToast(`已成功退回商戶 ${data.count} 張`);
+                    loadStats();
+                } else {
+                    updateProcessingStatus(processId, 'problem', startTime, data.message || '退回失敗');
+                }
+            })
+            .catch(err => {
+                updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
             });
-            const data = await res.json();
-            if (data.result === 'success') {
-                alert(`已成功退回商戶 ${data.count} 張禮券`);
-                // 清空表單
-                document.getElementById('retSupCodes').value = '';
-                document.getElementById('retSupDetectInfo').style.display = 'none';
-                document.getElementById('retSupPreviewBox').style.display = 'none';
-                document.getElementById('retSupReasonSelect').value = '';
-                document.getElementById('retSupReasonOther').value = '';
-                document.getElementById('retSupReasonOther').style.display = 'none';
-                loadStats();
-            } else {
-                alert('退回失敗: ' + (data.message || '未知錯誤'));
-            }
-        } catch(e) { alert('退回失敗: ' + e.message); }
-        hideLoading();
     }
 
     // ===== 電子禮券功能 =====
@@ -2898,7 +2962,7 @@
         if (field === 'sent' && checked) {
             const processId = generateProcessId();
             const startTime = new Date();
-            addProcessingStatus(processId, `電子禮券發出 (row ${row})`, 1, '電子禮券', '', startTime, '', '');
+            addProcessingStatus(processId, `電子禮券發出 (row ${row})`, 1, '電子禮券', '', startTime, '', '', payload);
             fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) })
                 .then(r => r.json())
                 .then(data => {
