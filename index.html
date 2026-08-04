@@ -233,6 +233,7 @@
             <!-- 禮券使用 -->
             <div id="usePage" class="page active">
                 <h2>禮券使用 (出庫)</h2>
+                <div class="form-group" style="margin-bottom:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                 <div id="useItemsContainer">
                     <!-- 品項 #1 (原始品項，ID 無後綴) -->
                     <div class="use-item-block" data-item-index="0">
@@ -287,7 +288,6 @@
                             <label style="cursor:pointer;"><input type="radio" name="useChannel" value="婚展"> 婚展</label>
                         </div>
                     </div>
-                    <div class="form-group"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
                     <div id="useItemsSummary" style="display:none; margin:10px 0; padding:12px; background:#f0f8ff; border-radius:10px; border:1px solid #b3d9ff;"></div>
                     <div style="margin:10px 0;">
                         <div onclick="var p=document.getElementById('useReportMonthPanel'); p.style.display=p.style.display==='none'?'inline-flex':'none'; this.querySelector('.toggle-arrow').textContent=p.style.display==='none'?'▶':'▼';" style="cursor:pointer; color:#0984e3; font-size:13px; font-weight:600; user-select:none;"><span class="toggle-arrow">▶</span> Report月份</div>
@@ -666,7 +666,57 @@
         document.getElementById('regReportMonth').innerHTML = monthOpts;
         document.getElementById('batchRptYear').innerHTML = '<option value="">年份</option>' + useRptYears.map(y => `<option value="${y}">${y}</option>`).join('');
         document.getElementById('batchRptMonth').innerHTML = monthOpts;
+        // 設定 Report月份預設值（25號切換規則）
+        const defaultRpt = getDefaultReportMonth();
+        if (defaultRpt) {
+            document.getElementById('useReportYear').value = defaultRpt.year;
+            document.getElementById('useReportMonth').value = defaultRpt.month;
+            document.getElementById('regReportYear').value = defaultRpt.year;
+            document.getElementById('regReportMonth').value = defaultRpt.month;
+        }
+        // Role-based 預設：購買渠道 & Report月份面板狀態
+        applyRoleDefaults();
         updateStatGiftMenu();
+    }
+
+    // 計算預設 Report月份：每月25號切換
+    // 26/1~25/2 = 2026-02, 26/2~25/3 = 2026-03, ...
+    function getDefaultReportMonth() {
+        const now = new Date();
+        const day = now.getDate();
+        let year, month;
+        if (day <= 25) {
+            // 1~25號：當月
+            year = now.getFullYear();
+            month = now.getMonth() + 1;
+        } else {
+            // 26~31號：下個月
+            const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+            year = next.getFullYear();
+            month = next.getMonth() + 1;
+        }
+        return { year: String(year), month: String(month).padStart(2, '0') };
+    }
+
+    // Role-based 預設
+    function applyRoleDefaults() {
+        if (currentRole === 'Admin') {
+            // Admin: 預設購買渠道 = online, Report月份展開
+            const onlineRadio = document.querySelector('input[name="useChannel"][value="online"]');
+            if (onlineRadio) onlineRadio.checked = true;
+            const panel = document.getElementById('useReportMonthPanel');
+            if (panel) panel.style.display = 'inline-flex';
+            const arrow = panel ? panel.previousElementSibling.querySelector('.toggle-arrow') : null;
+            if (arrow) arrow.textContent = '▼';
+        } else {
+            // Staff: 預設購買渠道 = 婚展, Report月份收起
+            const cardRadio = document.querySelector('input[name="useChannel"][value="婚展"]');
+            if (cardRadio) cardRadio.checked = true;
+            const panel = document.getElementById('useReportMonthPanel');
+            if (panel) panel.style.display = 'none';
+            const arrow = panel ? panel.previousElementSibling.querySelector('.toggle-arrow') : null;
+            if (arrow) arrow.textContent = '▶';
+        }
     }
 
     function updateEGiftGiftMenu() {
@@ -796,6 +846,7 @@
     }
 
     const actStatusCache = {}; // index -> 'act'|'unact'|'part'|'noreg'
+    const actStatusDetail = {}; // index -> {unactCount, total, unactivatedCodes}
 
     async function loadRecords() {
         showLoading();
@@ -809,34 +860,47 @@
     }
 
     async function preloadActivationStatuses() {
-        const BATCH = 3; // 同時查詢 3 筆（降低 GAS 並行壓力）
-        for (let i = 0; i < recordsCache.length; i += BATCH) {
-            const batch = [];
-            for (let j = i; j < Math.min(i + BATCH, recordsCache.length); j++) {
-                const r = recordsCache[j];
-                if (r[9] === '已登記刪除') { actStatusCache[j] = 'del'; continue; }
-                const type = r[10] || '使用';
-                if (type === '登記' || type === '退回') { actStatusCache[j] = 'na'; continue; }
-                batch.push(fetchActStatus(r[3], r[4], j));
+        // V3.7.5 批量查詢：收集所有需要查詢的記錄，一次 API 呼叫完成
+        // 已確認狀態（N欄 = index 13）的記錄直接用快取，不再查詢
+        const queries = [];
+        for (let i = 0; i < recordsCache.length; i++) {
+            const r = recordsCache[i];
+            if (r[9] === '已登記刪除') { actStatusCache[i] = 'del'; continue; }
+            const type = r[10] || '使用';
+            if (type === '退回') { actStatusCache[i] = 'na'; continue; }
+            // 檢查 N欄（index 13）是否已有確認狀態
+            const confirmedStatus = r[13] ? r[13].toString().trim() : '';
+            if (confirmedStatus === '已啟動') {
+                actStatusCache[i] = 'act';
+                actStatusDetail[i] = { unactCount: 0, total: 0, unactivatedCodes: [] };
+                continue; // 跳過，不需查詢
             }
-            if (batch.length > 0) await Promise.all(batch);
+            if (confirmedStatus === '登記' || type === '登記') {
+                actStatusCache[i] = 'na';
+                continue; // 登記類型不需查詢啟動狀態
+            }
+            queries.push({ start: r[3], end: r[4], idx: i, rowIdx: r[14] });
         }
-        // 全部查詢完成後重新渲染（如果有啟動狀態篩選活動中）
-        const fAct = document.getElementById('filterActStatus').value;
-        if (fAct) renderRecords();
-    }
-
-    async function fetchActStatus(start, end, idx) {
+        if (queries.length === 0) { renderRecords(); return; }
         try {
-            const res = await fetchWithRetry(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
-            const data = await res.json();
-            const unactCount = data.unactivatedCodes.length;
-            const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null;
-            if (total === 0) { actStatusCache[idx] = 'noreg'; }
-            else if (unactCount === 0) { actStatusCache[idx] = 'act'; }
-            else if (total !== null && unactCount >= total) { actStatusCache[idx] = 'unact'; }
-            else { actStatusCache[idx] = 'part'; }
-        } catch (e) { actStatusCache[idx] = 'unknown'; }
+            const res = await fetchWithRetry(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({ mode: 'checkActivationBatch', queries: queries })
+            });
+            const resp = await res.json();
+            if (resp.result === 'success' && resp.results) {
+                for (const item of resp.results) {
+                    actStatusCache[item.idx] = item.status;
+                    // 儲存詳細資訊供 renderActStatus 使用
+                    actStatusDetail[item.idx] = { unactCount: item.unactCount, total: item.total, unactivatedCodes: item.unactivatedCodes };
+                }
+            }
+        } catch (e) {
+            // 批量查詢失敗，標記所有為 unknown
+            for (const q of queries) { actStatusCache[q.idx] = 'unknown'; }
+        }
+        // 全部查詢完成後重新渲染
+        renderRecords();
     }
 
     function populateSupplierFilter() {
@@ -903,7 +967,8 @@
                 else if (fAct === 'noreg') matchAct = actStatusCache[idx] === 'noreg';
                 else if (fAct === 'na') matchAct = actStatusCache[idx] === 'na';
             } else if (fAct && actStatusCache[idx] === undefined) {
-                matchAct = false; // 尚未查詢到的記錄暫不顯示
+                // 尚未查詢到的記錄：篩選未啟動時保留（可能是未啟動），其他篩選排除
+                matchAct = (fAct === 'unact');
             }
             // Report月份篩選
             let matchRpt = true;
@@ -946,11 +1011,16 @@
             const batchChk = batchRptMode && !isDel ? `<td><input type="checkbox" class="batchRptChk" data-idx="${idx}" onchange="batchRptUpdateCount()"></td>` : (batchRptMode ? '<td></td>' : '');
             const delCell = currentRole === 'Admin' ? (!isDel ? `<button class="del-btn" onclick="deleteRow(${idx})">刪除</button>` : '已刪除') : '';
             const delTd = currentRole === 'Admin' ? `<td>${delCell}</td>` : '';
-            tr.innerHTML = `${batchChk}<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${reportMonthCell}</td><td id="act-status-${idx}">${noActivation ? (type === '退回' ? '不適用' : '-') : '讀取中...'}</td>${delTd}`;
+            // V3.7.5 先從快取渲染啟動狀態，不再逐筆呼叫 API
+            let actCellHtml = '讀取中...';
+            if (noActivation) {
+                actCellHtml = type === '退回' ? '不適用' : '-';
+            } else if (actStatusCache[idx] !== undefined && actStatusCache[idx] !== 'unknown') {
+                actCellHtml = getActStatusHtml(idx, r[3], r[4]);
+            }
+            tr.innerHTML = `${batchChk}<td>${new Date(r[0]).toLocaleString()}</td><td class="${typeClass}">${type}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td><td>${r[7]}</td><td>${reportMonthCell}</td><td id="act-status-${idx}">${actCellHtml}</td>${delTd}`;
             body.appendChild(tr);
-            if (!isDel && !noActivation) checkActivationStatus(r[3], r[4], idx);
-            else if (noActivation) { actStatusCache[idx] = 'na'; }
-            else document.getElementById(`act-status-${idx}`).innerText = "-";
+            if (noActivation) { actStatusCache[idx] = 'na'; }
         }
         renderRecordsPager(totalPages, filtered.length);
         hideLoading();
@@ -1044,8 +1114,10 @@
         const reportMonth = `${year}-${month}`;
         const checked = document.querySelectorAll('.batchRptChk:checked');
         if (checked.length === 0) { alert('請勾選至少一筆記錄'); return; }
-        const indices = Array.from(checked).map(cb => parseInt(cb.dataset.idx));
-        if (!confirm(`將 ${indices.length} 筆記錄的 Report月份更改為 ${reportMonth}，確認？`)) return;
+        const cacheIndices = Array.from(checked).map(cb => parseInt(cb.dataset.idx));
+        // 轉換為原始行索引（後端需要）
+        const indices = cacheIndices.map(i => recordsCache[i][14]);
+        if (!confirm(`將 ${cacheIndices.length} 筆記錄的 Report月份更改為 ${reportMonth}，確認？`)) return;
         showLoading();
         try {
             const res = await fetchWithRetry(API_URL, {
@@ -1056,7 +1128,7 @@
             if (data.result === 'success') {
                 showToast(`已更新 ${data.count} 筆記錄的 Report月份`);
                 // Update local cache
-                indices.forEach(i => { recordsCache[i][12] = reportMonth; });
+                cacheIndices.forEach(i => { recordsCache[i][12] = reportMonth; });
                 toggleBatchReportMonth();
             } else {
                 alert('更新失敗: ' + (data.message || '未知錯誤'));
@@ -1164,10 +1236,29 @@
         document.getElementById('recordsPager').innerHTML = `<span style="font-size:12px; color:#6c5ce7; font-weight:bold;">合併檢視模式 - 共 ${mergedResults.length} 組</span>`;
     }
 
+    // V3.7.5 從快取產生啟動狀態 HTML（給 renderRecords 使用）
+    function getActStatusHtml(idx, start, end) {
+        const status = actStatusCache[idx];
+        const detail = actStatusDetail[idx];
+        if (status === 'act') return `<span class="status-badge status-act">已啟動</span>`;
+        if (status === 'unact') return `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        if (status === 'part') {
+            const countInfo = detail ? ` (${detail.unactCount}/${detail.total})` : '';
+            const codeList = detail && detail.unactivatedCodes.length > 0 ? `<br><div class="code-list-mini">未啟: ${detail.unactivatedCodes.join(', ')}</div>` : '';
+            return `<span class="status-badge status-part">部分未啟動${countInfo}</span>${codeList}<button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
+        }
+        if (status === 'noreg') return `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼">查無入庫記錄</span>`;
+        if (status === 'na') return '不適用';
+        if (status === 'del') return '-';
+        return `<span style="color:#999;">讀取中...</span>`;
+    }
+
+    // 單筆查詢（用於啟用後重新查詢單一列）
     async function checkActivationStatus(start, end, idx, filter) {
         // 如果快取已有結果，直接用快取渲染，不重複查詢後端
         if (actStatusCache[idx] !== undefined && actStatusCache[idx] !== 'unknown') {
-            renderActStatus(idx, start, end);
+            const container = document.getElementById(`act-status-${idx}`);
+            if (container) container.innerHTML = getActStatusHtml(idx, start, end);
             return;
         }
         try {
@@ -1177,23 +1268,12 @@
             if (!container) return;
             const unactCount = data.unactivatedCodes.length;
             const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null;
-            // 範圍內查無任何入庫代碼
-            if (total === 0) {
-                actStatusCache[idx] = 'noreg';
-                container.innerHTML = `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼">查無入庫記錄</span>`;
-                return;
-            }
-            const isAllAct = unactCount === 0;
-            if (isAllAct) {
-                actStatusCache[idx] = 'act';
-                container.innerHTML = `<span class="status-badge status-act">已啟動</span>`;
-            } else if (total !== null && unactCount >= total) {
-                actStatusCache[idx] = 'unact';
-                container.innerHTML = `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-            } else {
-                actStatusCache[idx] = 'part';
-                container.innerHTML = `<span class="status-badge status-part">部分未啟動${total !== null ? ` (${unactCount}/${total})` : ''}</span><br><div class="code-list-mini">未啟: ${data.unactivatedCodes.join(', ')}</div><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-            }
+            if (total === 0) { actStatusCache[idx] = 'noreg'; }
+            else if (unactCount === 0) { actStatusCache[idx] = 'act'; }
+            else if (total !== null && unactCount >= total) { actStatusCache[idx] = 'unact'; }
+            else { actStatusCache[idx] = 'part'; }
+            actStatusDetail[idx] = { unactCount: unactCount, total: total, unactivatedCodes: data.unactivatedCodes };
+            container.innerHTML = getActStatusHtml(idx, start, end);
         } catch (err) {
             const container = document.getElementById(`act-status-${idx}`);
             if (container) container.innerHTML = `<span style="color:#999;">查詢失敗</span>`;
@@ -1203,14 +1283,7 @@
     function renderActStatus(idx, start, end) {
         const container = document.getElementById(`act-status-${idx}`);
         if (!container) return;
-        const status = actStatusCache[idx];
-        if (status === 'act') container.innerHTML = `<span class="status-badge status-act">已啟動</span>`;
-        else if (status === 'unact') container.innerHTML = `<span class="status-badge status-unact">未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-        else if (status === 'part') container.innerHTML = `<span class="status-badge status-part">部分未啟動</span><br><button class="act-row-btn" onclick="activateRange('${start}', '${end}', ${idx})">啟用</button>`;
-        else if (status === 'noreg') container.innerHTML = `<span class="status-badge status-part" title="GiftStatus 中找不到此範圍的代碼">查無入庫記錄</span>`;
-        else if (status === 'na') container.innerHTML = '不適用';
-        else if (status === 'del') container.innerHTML = '-';
-        else container.innerHTML = `<span style="color:#999;">讀取中...</span>`;
+        container.innerHTML = getActStatusHtml(idx, start, end);
     }
 
     // ===== 多品項出庫系統 (Multi-Item Use) =====
@@ -1709,12 +1782,16 @@
         if (inventoryCheckFailed) return;
         hideLoading();
 
-        // 清空表單（全部品項）
-        document.querySelectorAll('input[name="useChannel"]').forEach(r => r.checked = false);
+        // 清空表單（全部品項）並重新套用預設值
         document.getElementById('useOrderNo').value = "";
-        document.getElementById('useReportYear').value = '';
-        document.getElementById('useReportMonth').value = '';
-        document.getElementById('useReportMonthPanel').style.display = 'none';
+        // 重新套用 Report月份預設值
+        const defRpt = getDefaultReportMonth();
+        if (defRpt) {
+            document.getElementById('useReportYear').value = defRpt.year;
+            document.getElementById('useReportMonth').value = defRpt.month;
+        }
+        // 重新套用 Role-based 預設（渠道 + 面板狀態）
+        applyRoleDefaults();
         for (const n of activeIndices) {
             const startEl = useEl('useStart', n); if (startEl) startEl.value = '';
             const endEl = useEl('useEnd', n); if (endEl) endEl.value = '';
@@ -2105,7 +2182,7 @@
         const m = document.getElementById(`rpt-m-${idx}`).value;
         if (!y || !m) { alert('請選擇年份和月份'); return; }
         const value = `${y}-${m}`;
-        const origRowIdx = recordsCache[idx][13]; // original row index from backend
+        const origRowIdx = recordsCache[idx][14]; // original row index from backend
         try {
             await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'updateReportMonth', index: origRowIdx, reportMonth: value }) });
             recordsCache[idx][12] = value;
@@ -2198,7 +2275,7 @@
     async function deleteRow(i) {
         if (!confirm("確認刪除？(將會重置使用狀態並同步分表)")) return;
         showLoading();
-        const origRowIdx = recordsCache[i][13]; // original row index from backend
+        const origRowIdx = recordsCache[i][14]; // original row index from backend
         await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify({ action: 'markDeleted', index: origRowIdx }) });
         loadRecords(); loadStats();
     }
@@ -2230,7 +2307,7 @@
             addProcessingStatus(regId, `入庫 ${s}/${g}`, codes.length, s, g, new Date(), codeStart, codeEnd, regPayload);
             // 清空表單讓用戶繼續操作
             document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
-            document.getElementById('regReportYear').value = ''; document.getElementById('regReportMonth').value = '';
+            const defRptReg = getDefaultReportMonth(); if (defRptReg) { document.getElementById('regReportYear').value = defRptReg.year; document.getElementById('regReportMonth').value = defRptReg.month; }
             document.getElementById('regActivated').checked = false;
             // 背景執行登記
             const startTime = new Date();
@@ -2343,12 +2420,17 @@
             updateProcessingStatus(processId, 'completed', startTime);
             showToast("啟用完成");
             // 重新查詢該列的啟動狀態（若仍在同一頁）
+            // V3.7.5 先清除快取以強制重新查詢
+            delete actStatusCache[idx];
+            delete actStatusDetail[idx];
             if (document.getElementById(`act-status-${idx}`)) {
                 checkActivationStatus(start, end, idx, document.getElementById('filterActStatus').value);
             }
             loadStats();
         } catch (err) {
             updateProcessingStatus(processId, 'problem', startTime, err.message || '啟用失敗');
+            delete actStatusCache[idx];
+            delete actStatusDetail[idx];
             if (document.getElementById(`act-status-${idx}`)) {
                 checkActivationStatus(start, end, idx, document.getElementById('filterActStatus').value);
             }
