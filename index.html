@@ -541,12 +541,15 @@
     };
 
     // 全局 fetch 重試包裝器：處理 GAS 冷啟動超時和間歇性錯誤
+    // POST 請求（寫入操作）不重試，避免重複寫入
     async function fetchWithRetry(url, options, maxRetries = 2) {
+        const isPost = options && options.method && options.method.toUpperCase() === 'POST';
+        const retries = isPost ? 0 : maxRetries; // POST 不重試
         let lastError;
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 90000); // 90秒超時
+                const timeoutId = setTimeout(() => controller.abort(), isPost ? 300000 : 90000); // POST 5分鐘，GET 90秒
                 const opts = { ...options, signal: controller.signal };
                 const res = await fetch(url, opts);
                 clearTimeout(timeoutId);
@@ -555,7 +558,7 @@
             } catch (err) {
                 lastError = err;
                 console.warn(`fetchWithRetry attempt ${attempt + 1} failed:`, err.message);
-                if (attempt < maxRetries) {
+                if (attempt < retries) {
                     await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); // 遞增等待
                 }
             }
