@@ -540,6 +540,29 @@
         solved: []
     };
 
+    // 全局 fetch 重試包裝器：處理 GAS 冷啟動超時和間歇性錯誤
+    async function fetchWithRetry(url, options, maxRetries = 2) {
+        let lastError;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 90000); // 90秒超時
+                const opts = { ...options, signal: controller.signal };
+                const res = await fetch(url, opts);
+                clearTimeout(timeoutId);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res;
+            } catch (err) {
+                lastError = err;
+                console.warn(`fetchWithRetry attempt ${attempt + 1} failed:`, err.message);
+                if (attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); // 遞增等待
+                }
+            }
+        }
+        throw lastError;
+    }
+
     function showToast(msg = "存檔成功！") { const t = document.getElementById('toast'); t.innerText = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2000); }
     function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
     function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
@@ -549,7 +572,7 @@
         const email = document.getElementById('loginEmail').value;
         const code = document.getElementById('loginCode').value;
         try {
-            const res = await fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`);
+            const res = await fetchWithRetry(`${API_URL}?action=verify&email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}`);
             const data = await res.json();
             if (data.success) {
                 currentUser = data.name;
@@ -594,25 +617,17 @@
         }
     }
 
-    async function refreshConfig(retryCount) {
-        retryCount = retryCount || 0;
+    async function refreshConfig() {
         try {
-            const configRes = await fetch(`${API_URL}?action=getConfig`);
-            if (!configRes.ok) throw new Error('getConfig HTTP ' + configRes.status);
+            const configRes = await fetchWithRetry(`${API_URL}?action=getConfig`);
             giftDatabase = await configRes.json();
             initDropdowns();
         } catch (e) {
             console.error('refreshConfig getConfig failed:', e);
-            if (retryCount < 2) {
-                setTimeout(() => refreshConfig(retryCount + 1), 3000);
-                return;
-            } else {
-                showToast('載入配置失敗，請重新整理頁面');
-            }
+            showToast('載入配置失敗，請重新整理頁面');
         }
         try {
-            const batchRes = await fetch(`${API_URL}?action=getBatch`);
-            if (!batchRes.ok) throw new Error('getBatch HTTP ' + batchRes.status);
+            const batchRes = await fetchWithRetry(`${API_URL}?action=getBatch`);
             currentBatch = (await batchRes.json()).batch;
             document.getElementById('batchDisplay').innerText = currentBatch;
         } catch (e) {
@@ -686,7 +701,7 @@
         const supplier = document.getElementById('statSupplier').value;
         const gift = document.getElementById('statGift').value;
         const url = `${API_URL}?action=getStats&start=${start}&end=${end}&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}`;
-        const res = await fetch(url);
+        const res = await fetchWithRetry(url);
         const stats = await res.json();
         const body = document.getElementById('statsTableBody');
         body.innerHTML = "";
@@ -730,7 +745,7 @@
             brandStatsRecordsCache = {}; // 清空快取
             for (const q of queries) {
                 const url = `${API_URL}?action=getBrandStats&supplier=${encodeURIComponent(q.supplier)}&gift=${encodeURIComponent(q.gift)}&start=${start}&end=${end}&reportMonth=${encodeURIComponent(reportMonth)}`;
-                const res = await fetch(url);
+                const res = await fetchWithRetry(url);
                 const data = await res.json();
                 if (data.error) continue;
                 // 快取記錄以便編輯
@@ -781,7 +796,7 @@
 
     async function loadRecords() {
         showLoading();
-        const res = await fetch(`${API_URL}?action=getRecords`);
+        const res = await fetchWithRetry(`${API_URL}?action=getRecords`);
         recordsCache = await res.json();
         // 動態填入供應商篩選下拉選單
         populateSupplierFilter();
@@ -810,7 +825,7 @@
 
     async function fetchActStatus(start, end, idx) {
         try {
-            const res = await fetch(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+            const res = await fetchWithRetry(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
             const data = await res.json();
             const unactCount = data.unactivatedCodes.length;
             const total = (typeof data.totalInRange === 'number') ? data.totalInRange : null;
@@ -1030,7 +1045,7 @@
         if (!confirm(`將 ${indices.length} 筆記錄的 Report月份更改為 ${reportMonth}，確認？`)) return;
         showLoading();
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
                 body: JSON.stringify({ mode: 'batchUpdateReportMonth', indices: indices, reportMonth: reportMonth })
             });
@@ -1153,7 +1168,7 @@
             return;
         }
         try {
-            const res = await fetch(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+            const res = await fetchWithRetry(`${API_URL}?action=checkActivation&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
             const data = await res.json();
             const container = document.getElementById(`act-status-${idx}`);
             if (!container) return;
@@ -1459,7 +1474,7 @@
 
         setDetectStatusN(n, 'detecting');
         itemBackendDetectTimers[n] = setTimeout(() => {
-            fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
+            fetchWithRetry(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
                 .then(r => r.json()).then(d => {
                     detectCache[code] = d;
                     if (getCurrentInputCodeN(n) !== code) return;
@@ -1594,7 +1609,7 @@
         if (usageWarning) usageWarning.style.display = 'none';
         
         try {
-            const res = await fetch(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+            const res = await fetchWithRetry(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
             const data = await res.json();
             if (itemCurrentUseCodes[n] !== codes) return;
             if (data.usedCodes && data.usedCodes.length > 0) {
@@ -1671,7 +1686,7 @@
         let inventoryCheckFailed = false;
         for (const item of itemsToSubmit) {
             try {
-                const checkRes = await fetch(`${API_URL}?action=checkInventory&codes=${encodeURIComponent(JSON.stringify(item.codes))}`);
+                const checkRes = await fetchWithRetry(`${API_URL}?action=checkInventory&codes=${encodeURIComponent(JSON.stringify(item.codes))}`);
                 const checkData = await checkRes.json();
                 if (checkData.notInInventory && checkData.notInInventory.length > 0) {
                     hideLoading();
@@ -1753,7 +1768,7 @@
             // 非同步提交（不阻擋下一個品項的提交）
             (async () => {
                 try {
-                    const res = await fetch(API_URL, { 
+                    const res = await fetchWithRetry(API_URL, { 
                         method: "POST", 
                         body: JSON.stringify(usePayload) 
                     });
@@ -1786,7 +1801,7 @@
     // 從後端載入持久化的監控任務（所有用戶共享，特別是「有問題」和「處理中」的任務）
     async function loadTaskMonitor() {
         try {
-            const res = await fetch(`${API_URL}?action=getTaskMonitor`);
+            const res = await fetchWithRetry(`${API_URL}?action=getTaskMonitor`);
             const tasks = await res.json();
             if (!Array.isArray(tasks)) return;
             // 清空現有狀態（從後端重新載入）
@@ -1933,7 +1948,7 @@
         addProcessingStatus(newId, problem.orderNo, problem.count, problem.supplier, problem.gift, startTime, problem.codeStart, problem.codeEnd, problem.retryPayload);
 
         // 重新發送請求
-        fetch(API_URL, { method: 'POST', body: JSON.stringify(problem.retryPayload) })
+        fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(problem.retryPayload) })
             .then(r => r.json())
             .then(data => {
                 if (data.result === 'success') {
@@ -2089,7 +2104,7 @@
         const value = `${y}-${m}`;
         const origRowIdx = recordsCache[idx][13]; // original row index from backend
         try {
-            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'updateReportMonth', index: origRowIdx, reportMonth: value }) });
+            await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'updateReportMonth', index: origRowIdx, reportMonth: value }) });
             recordsCache[idx][12] = value;
             const container = document.getElementById(`rpt-edit-${idx}`);
             if (container) container.outerHTML = `<span id="rpt-${idx}" onclick="editReportMonth(${idx})" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${value}</span>`;
@@ -2124,7 +2139,7 @@
         if (!cached || !cached[ri]) { alert('無法找到記錄索引，請重新查詢'); return; }
         const recIndex = cached[ri].recIndex;
         try {
-            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'updateReportMonth', index: recIndex, reportMonth: value }) });
+            await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'updateReportMonth', index: recIndex, reportMonth: value }) });
             cached[ri].reportMonth = value;
             const container = document.getElementById(`brpt-edit-${supplier}-${gift}-${ri}`);
             if (container) container.outerHTML = `<span id="brpt-${supplier}-${gift}-${ri}" onclick="editBrandRpt('${supplier}','${gift}',${ri},'${value}')" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${value}</span>`;
@@ -2165,7 +2180,7 @@
         if (!confirm(`將設定 ${indices.length} 筆記錄的 Report月份為 ${value}，確認？`)) return;
         showLoading();
         try {
-            await fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'batchUpdateReportMonth', indices: indices, reportMonth: value }) });
+            await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'batchUpdateReportMonth', indices: indices, reportMonth: value }) });
             cached.forEach(r => { r.reportMonth = value; });
             // 更新顯示
             cached.forEach((r, ri) => {
@@ -2181,7 +2196,7 @@
         if (!confirm("確認刪除？(將會重置使用狀態並同步分表)")) return;
         showLoading();
         const origRowIdx = recordsCache[i][13]; // original row index from backend
-        await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'markDeleted', index: origRowIdx }) });
+        await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify({ action: 'markDeleted', index: origRowIdx }) });
         loadRecords(); loadStats();
     }
 
@@ -2192,7 +2207,7 @@
         let codes = (document.getElementById('regMode').value === 'list') ? document.getElementById('regCodes').value.split('\n').map(c => c.trim()).filter(c => c !== "") : getRangeCodes(document.getElementById('regStart').value.trim(), document.getElementById('regEnd').value.trim());
         if (codes.length === 0) { alert("請輸入有效的代碼"); hideLoading(); return; }
         try {
-            const checkRes = await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: 'checkRegDuplicates', codes: codes }) });
+            const checkRes = await fetchWithRetry(API_URL, { method: "POST", body: JSON.stringify({ action: 'checkRegDuplicates', codes: codes }) });
             const checkData = await checkRes.json();
             if (checkData.duplicates && checkData.duplicates.length > 0) {
                 hideLoading(); alert(`警告：以下代碼已入庫過，整批登記已取消！\n重複代碼：${checkData.duplicates.join(', ')}`); return;
@@ -2216,7 +2231,7 @@
             document.getElementById('regActivated').checked = false;
             // 背景執行登記
             const startTime = new Date();
-            fetch(API_URL, { method: "POST", body: JSON.stringify(regPayload) })
+            fetchWithRetry(API_URL, { method: "POST", body: JSON.stringify(regPayload) })
                 .then(r => r.json())
                 .then(regData => {
                     if (regData.result === "success") {
@@ -2255,17 +2270,17 @@
         }
         if (statusEl) { statusEl.style.color = '#ff9500'; statusEl.innerText = '\u23f3 \u8b58\u5225\u4e2d...'; }
         actDetectTimer = setTimeout(() => {
-            fetch(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
+            fetchWithRetry(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
                 .then(r => r.json()).then(d => {
                     detectCache[code] = d;
                     if (document.getElementById('actStart').value.trim() !== code) return;
                     if (d && d.success) {
-                        if (statusEl) { statusEl.style.color = '#28a745'; statusEl.innerText = `\u2713 \u5df2\u8b58\u5225: ${d.supplier} / ${d.giftName}`; }
+                        if (statusEl) { statusEl.style.color = '#28a745'; statusEl.innerText = `✓ 已識別: ${d.supplier} / ${d.giftName}`; }
                     } else {
-                        if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '\u2717 \u6c92\u627e\u5230\u5c0d\u61c9\u7684\u4f9b\u61c9\u5546/\u9805\u76ee'; }
+                        if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '✗ 沒找到對應的供應商/項目'; }
                     }
                 }).catch(() => {
-                    if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '\u2717 \u8b58\u5225\u67e5\u8a62\u5931\u6557'; }
+                    if (statusEl) { statusEl.style.color = '#ff3b30'; statusEl.innerText = '✗ 識別查詢失敗'; }
                 });
         }, 400);
     }
@@ -2294,7 +2309,7 @@
 
         // \u80cc\u666f\u57f7\u884c
         try {
-            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(actPayload) });
+            const res = await fetchWithRetry(API_URL, { method: "POST", body: JSON.stringify(actPayload) });
             const data = await res.json().catch(() => ({}));
             if (data && data.result && data.result !== 'success') throw new Error(data.message || '\u555f\u7528\u5931\u6557');
             updateProcessingStatus(processId, 'completed', startTime);
@@ -2319,7 +2334,7 @@
         if (cell) cell.innerHTML = `<span class="status-badge status-part">啟用中...</span>`;
 
         try {
-            const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(actRangePayload) });
+            const res = await fetchWithRetry(API_URL, { method: "POST", body: JSON.stringify(actRangePayload) });
             const data = await res.json().catch(() => ({}));
             if (data && data.result && data.result !== "success") throw new Error(data.message || "啟用失敗");
             updateProcessingStatus(processId, 'completed', startTime);
@@ -2399,7 +2414,7 @@
             // 查詢代碼狀態（供應商/項目/訂單號/使用狀態）
             infoEl.innerHTML = '<span style="color:#e6a700;">偵測中...</span>';
             try {
-                const res = await fetch(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+                const res = await fetchWithRetry(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(codes))}`);
                 const data = await res.json();
                 if (data.results && data.results.length > 0) {
                     const first = data.results[0];
@@ -2438,7 +2453,7 @@
             if (codes.length === 0) { infoEl.innerHTML = ''; previewBox.style.display = 'none'; return; }
             infoEl.innerHTML = '<span style="color:#e6a700;">偵測中...</span>';
             try {
-                const res = await fetch(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(codes))}`);
+                const res = await fetchWithRetry(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(codes))}`);
                 const data = await res.json();
                 if (data.results && data.results.length > 0) {
                     const first = data.results[0];
@@ -2553,7 +2568,7 @@
         document.getElementById('returnConfirmBtn').style.display = 'none';
 
         // 背景執行退回
-        fetch(API_URL, {
+        fetchWithRetry(API_URL, {
             method: 'POST',
             body: JSON.stringify(returnPayload)
         })
@@ -2590,7 +2605,7 @@
         if (!supplier || !gift) { alert('請先選擇供應商和禮券項目'); return; }
         showLoading();
         try {
-            const res = await fetch(`${API_URL}?action=getUnusedCodes&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}`);
+            const res = await fetchWithRetry(`${API_URL}?action=getUnusedCodes&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}`);
             const json = await res.json();
             if (json.error) { alert(json.error); hideLoading(); return; }
             const codes = json.codes || [];
@@ -2610,7 +2625,7 @@
             const infoDiv = document.getElementById('retSupDetectInfo');
             if (lines.length === 0) { infoDiv.style.display = 'none'; return; }
             try {
-                const res = await fetch(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(lines))}`);
+                const res = await fetchWithRetry(`${API_URL}?action=getCodeStatus&codes=${encodeURIComponent(JSON.stringify(lines))}`);
                 const json = await res.json();
                 const data = json.results || json;
                 if (!data || data.length === 0) { infoDiv.innerHTML = '<span style="color:red">未找到代碼</span>'; infoDiv.style.display = 'block'; return; }
@@ -2681,7 +2696,7 @@
         showToast('退回商戶任務已提交');
 
         // 背景執行
-        fetch(API_URL, { method: 'POST', body: JSON.stringify(retSupPayload) })
+        fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(retSupPayload) })
             .then(r => r.json())
             .then(data => {
                 if (data.result === 'success') {
@@ -2721,7 +2736,7 @@
         }
         showLoading();
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
                 body: JSON.stringify({
                     mode: 'eGiftRegister',
@@ -2757,7 +2772,7 @@
         const container = document.getElementById('eGiftPendingList');
         container.innerHTML = '<p style="color:#999;">載入中...</p>';
         try {
-            const res = await fetch(`${API_URL}?action=getEGiftPending`);
+            const res = await fetchWithRetry(`${API_URL}?action=getEGiftPending`);
             const list = await res.json();
             if (!list || list.length === 0) {
                 container.innerHTML = '<div style="text-align:center; padding:30px; color:#999; font-size:14px; border:1px dashed #ddd; border-radius:8px; margin-top:10px;">沒有未完成的電子禮券</div>';
@@ -2813,7 +2828,7 @@
         }
         showLoading();
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
                 body: JSON.stringify({
                     mode: 'eGiftSaveCodes',
@@ -2858,7 +2873,7 @@
         const container = document.getElementById('eGiftCompletedList');
         container.innerHTML = '<p style="color:#999;">載入中...</p>';
         try {
-            const res = await fetch(`${API_URL}?action=getEGiftCompleted`);
+            const res = await fetchWithRetry(`${API_URL}?action=getEGiftCompleted`);
             const list = await res.json();
             if (!list || list.length === 0) {
                 container.innerHTML = '<div style="text-align:center; padding:20px; color:#999; font-size:13px;">沒有已完成的電子禮券</div>';
@@ -2915,7 +2930,7 @@
         const reportMonth = `${ry.value}-${rm.value}`;
         showLoading();
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
                 body: JSON.stringify({ mode: 'eGiftSaveReportMonth', row: row, reportMonth: reportMonth })
             });
@@ -2963,7 +2978,7 @@
             const processId = generateProcessId();
             const startTime = new Date();
             addProcessingStatus(processId, `電子禮券發出 (row ${row})`, 1, '電子禮券', '', startTime, '', '', payload);
-            fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) })
+            fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
                 .then(r => r.json())
                 .then(data => {
                     if (data.result === 'success') {
@@ -2985,7 +3000,7 @@
         // 其他欄位更新（submitted, made）仍用原來的方式
         showLoading();
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
                 body: JSON.stringify(payload)
             });
