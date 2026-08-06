@@ -1989,11 +1989,21 @@
             if (processingStatuses.completed.length > 3) {
                 processingStatuses.completed = processingStatuses.completed.slice(0, 3);
             }
+            // 自動移除已完成項目（8秒後淡出）
+            setTimeout(() => {
+                processingStatuses.completed = processingStatuses.completed.filter(p => p.id !== id);
+                updateStatusDisplay();
+            }, 8000);
         } else if (newStatus === 'problem') {
             processingStatuses.problem.unshift(statusItem);
         } else if (newStatus === 'solved') {
             processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
             processingStatuses.solved = [statusItem];
+            // 問題已解決也 8 秒後自動消失
+            setTimeout(() => {
+                processingStatuses.solved = processingStatuses.solved.filter(p => p.id !== id);
+                updateStatusDisplay();
+            }, 8000);
         }
 
         updateStatusDisplay();
