@@ -2252,7 +2252,29 @@
 
     // 每秒自動更新處理中任務的經過時間
     setInterval(() => {
-        if (processingStatuses.processing.length > 0) updateStatusDisplay();
+        if (processingStatuses.processing.length > 0) {
+            // 超過 5 分鐘未完成的任務自動標記為「有問題」
+            const timedOut = processingStatuses.processing.filter(p => (new Date() - p.startTime) / 1000 > 300);
+            timedOut.forEach(item => {
+                processingStatuses.processing = processingStatuses.processing.filter(p => p.id !== item.id);
+                const duration = ((new Date() - item.startTime) / 1000).toFixed(1);
+                processingStatuses.problem.unshift({
+                    id: item.id,
+                    orderNo: item.orderNo,
+                    count: item.count,
+                    supplier: item.supplier,
+                    gift: item.gift,
+                    startTime: item.startTime,
+                    duration: duration,
+                    errorMsg: '處理逾時（超過 5 分鐘未回應，可能已失敗）',
+                    status: 'problem',
+                    codeStart: item.codeStart || '',
+                    codeEnd: item.codeEnd || '',
+                    retryPayload: item.retryPayload || null
+                });
+            });
+            updateStatusDisplay();
+        }
     }, 1000);
 
     function getReportYearOptions() {
