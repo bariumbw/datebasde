@@ -1981,19 +1981,40 @@
             processingStatuses.solved = [];
             // 保留當前 session 正在處理中的任務（不覆蓋）
             tasks.forEach(t => {
+                const tSupplier = (t.detail || '').split(' - ')[0] || t.supplier || '';
+                const tGift = (t.detail || '').split(' - ')[1] || t.gift || '';
+                const tOrderNo = t.description || t.orderNo || '';
+                const tStart = t.codeStart || '';
+                const tEnd = t.codeEnd || '';
+                const tChannel = t.channel || '';
+                const tReportMonth = t.reportMonth || '';
+                // 建構最小 retryPayload 讓「載入到出庫」能運作
+                const reconstructedPayload = {
+                    recordInfo: {
+                        supplier: tSupplier,
+                        gift: tGift,
+                        orderNo: tOrderNo,
+                        start: tStart,
+                        end: tEnd,
+                        channel: tChannel,
+                        reportMonth: tReportMonth,
+                        count: t.count || 0
+                    }
+                };
                 const statusItem = {
                     id: t.taskId || t.id || generateProcessId(),
-                    orderNo: t.description || t.orderNo || '',
+                    orderNo: tOrderNo,
                     count: t.count || '-',
-                    supplier: (t.detail || '').split(' - ')[0] || t.supplier || '',
-                    gift: (t.detail || '').split(' - ')[1] || t.gift || '',
+                    supplier: tSupplier,
+                    gift: tGift,
                     startTime: t.startTime ? new Date(t.startTime) : new Date(),
                     duration: t.elapsedSec || '0',
                     errorMsg: t.errorMsg || '',
                     status: t.status,
-                    codeStart: t.codeStart || '',
-                    codeEnd: t.codeEnd || '',
-                    user: t.user || ''
+                    codeStart: tStart,
+                    codeEnd: tEnd,
+                    user: t.user || '',
+                    retryPayload: reconstructedPayload
                 };
                 if (t.status === '有問題' || t.status === 'problem') {
                     processingStatuses.problem.push(statusItem);
@@ -2049,7 +2070,9 @@
             startTime: startTime,
             status: '處理中',
             codeStart: codeStart || '',
-            codeEnd: codeEnd || ''
+            codeEnd: codeEnd || '',
+            channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : '',
+            reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : ''
         });
     }
 
@@ -2115,6 +2138,64 @@
             processingStatuses.processing.push(problem);
             updateProcessingStatus(id, 'solved', problem.startTime, problem.errorMsg || '');
         }
+    }
+
+    function loadProblemToForm(id) {
+        const problem = processingStatuses.problem.find(p => p.id === id);
+        if (!problem || !problem.retryPayload) { alert('無法載入：缺少任務資料'); return; }
+        const payload = problem.retryPayload;
+        const info = payload.recordInfo || {};
+        
+        // 切換到出庫頁面
+        switchPage('usePage');
+        
+        // 填入訂單號
+        document.getElementById('useOrderNo').value = info.orderNo || '';
+        
+        // 填入供應商和項目
+        const supEl = useEl('useSupplierSelect', 0);
+        if (supEl) supEl.value = info.supplier || '';
+        useUpdateGiftSelectN(0, info.gift || '');
+        
+        // 填入代碼範圍
+        const startEl = useEl('useStart', 0);
+        const endEl = useEl('useEnd', 0);
+        if (startEl) startEl.value = info.start || '';
+        if (endEl) endEl.value = info.end || '';
+        
+        // 觸發識別和數量計算
+        if (startEl && startEl.value) {
+            useSmartDetectDebouncedN(0);
+            useUpdateRangeCountN(0);
+        }
+        
+        // 填入購買渠道
+        if (info.channel) {
+            const channelRadio = document.querySelector(`input[name="useChannel"][value="${info.channel}"]`);
+            if (channelRadio) channelRadio.checked = true;
+        }
+        
+        // 填入 Report 月份
+        if (info.reportMonth) {
+            const parts = info.reportMonth.split('-');
+            if (parts.length === 2) {
+                document.getElementById('useReportYear').value = parts[0];
+                document.getElementById('useReportMonth').value = parts[1];
+            }
+        }
+        
+        // 從問題清單移除
+        processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
+        updateStatusDisplay();
+        showToast('已載入到出庫表單，請確認後提交');
+    }
+
+    function clearAllProblems() {
+        if (processingStatuses.problem.length === 0) return;
+        if (!confirm(`確定要清除所有 ${processingStatuses.problem.length} 個問題任務嗎？`)) return;
+        processingStatuses.problem = [];
+        updateStatusDisplay();
+        showToast('已清除所有問題任務');
     }
 
     function retryTask(id) {
@@ -2218,8 +2299,9 @@
                         <strong>問題:</strong> ${item.errorMsg}
                     </div>
                     <div style="display:flex; gap:6px; margin-top:6px;">
-                        ${item.retryPayload ? `<button class="clear-btn" style="background:#2563eb; color:#fff; border:none;" onclick="retryTask('${item.id}')">重試</button>` : ''}
-                        <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">標記已解決</button>
+                        ${item.retryPayload ? `<button class="clear-btn" style="background:#2563eb; color:#fff; border:none;" onclick="loadProblemToForm('${item.id}')">\u8f09\u5165\u5230\u51fa\u5eab</button>` : ''}
+                        ${item.retryPayload ? `<button class="clear-btn" style="background:#6b7280; color:#fff; border:none;" onclick="retryTask('${item.id}')">\u76f4\u63a5\u91cd\u8a66</button>` : ''}
+                        <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">\u6e05\u9664</button>
                     </div>
                 </div>
             `;
