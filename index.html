@@ -232,8 +232,8 @@
 
             <!-- 禮券使用 -->
             <div id="usePage" class="page active">
-                <h2>禮券使用 (出庫)</h2>
-                <div class="form-group" style="margin-bottom:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required></div>
+                <h2 style="display:flex; align-items:center; gap:12px;">禮券使用 (出庫) <button id="refreshCacheBtn" onclick="manualUpdateCodeIndex()" style="font-size:12px; padding:4px 10px; background:#f0f0f0; border:1px solid #ccc; border-radius:4px; cursor:pointer;">重新載入識別快取</button></h2>
+                <div class="form-group" style="margin-bottom:15px;"><label>填寫訂單號 (必填)</label><input type="text" id="useOrderNo" required onchange="setTimeout(()=>{const el=document.getElementById('useStart');if(el)el.focus();},50)" onkeypress="if(event.keyCode==13){event.preventDefault();const el=document.getElementById('useStart');if(el)el.focus();}"></div>
                 <div id="useItemsContainer">
                     <!-- 品項 #1 (原始品項，ID 無後綴) -->
                     <div class="use-item-block" data-item-index="0">
@@ -589,6 +589,7 @@
                 refreshConfig();
                 loadStats(false);
                 loadTaskMonitor();
+                loadCodeIndex();
             } else { alert('驗證失敗'); hideLoading(); }
         } catch (e) { alert('系統錯誤，請檢查 API 網址是否正確'); hideLoading(); }
     }
@@ -1505,7 +1506,84 @@
     }
     function useSmartDetectList() { useSmartDetectListN(0); }
 
-    const detectCache = {}; // 識別結果快取：同一代碼不重複查詢後端
+    const detectCache = {}; // 識別結果快取：同一代碼不重複查詢
+
+    // ===== 代碼識別本地快取 =====
+    let localCodeIndex = null; // { canonCode: {supplier, giftName, storedCode} }
+    let localCalcTypeMap = null; // { 'supplier|name': calcType }
+    let localCacheLoaded = false;
+
+    function canonCodeLocal(v) {
+        var s = (v === null || v === undefined) ? '' : v.toString().trim();
+        if (/^\d+$/.test(s)) {
+            var stripped = s.replace(/^0+/, '');
+            return stripped === '' ? '0' : stripped;
+        }
+        return s;
+    }
+
+    async function loadCodeIndex() {
+        try {
+            const res = await fetchWithRetry(`${API_URL}?action=getCodeIndex`);
+            const data = await res.json();
+            localCodeIndex = {};
+            localCalcTypeMap = data.calcTypes || {};
+            // data.codes = [[supplier, giftName, code], ...]
+            (data.codes || []).forEach(item => {
+                localCodeIndex[canonCodeLocal(item[2])] = { supplier: item[0], giftName: item[1], storedCode: item[2] };
+            });
+            localCacheLoaded = true;
+            console.log(`[代碼快取] 已載入 ${(data.codes || []).length} 筆代碼`);
+        } catch (e) {
+            console.warn('[代碼快取] 載入失敗，將使用後端查詢', e);
+        }
+    }
+
+    function localDetectFromCache(rawCode) {
+        if (!localCacheLoaded || !localCodeIndex) return null;
+        // 候選代碼（同後端邏輯）
+        const candidates = [[rawCode, 0]];
+        if (rawCode.length > 1) candidates.push([rawCode.substring(0, rawCode.length - 1), 1]);
+        if (rawCode.length > 2) candidates.push([rawCode.substring(0, rawCode.length - 2), 2]);
+        if (rawCode.length > 12) candidates.push([rawCode.substring(rawCode.length - 12), 12]);
+        if (rawCode.length > 6) {
+            var tail6 = rawCode.substring(rawCode.length - 6);
+            candidates.push([tail6.substring(0, tail6.length - 1), 61]);
+        }
+        for (let c = 0; c < candidates.length; c++) {
+            const hit = localCodeIndex[canonCodeLocal(candidates[c][0])];
+            if (hit) {
+                const calcType = localCalcTypeMap[hit.supplier + '|' + hit.giftName] || 'normal';
+                return {
+                    success: true,
+                    supplier: hit.supplier,
+                    giftName: hit.giftName,
+                    matchedCode: hit.storedCode || candidates[c][0],
+                    strippedDigits: candidates[c][1],
+                    calcType: calcType
+                };
+            }
+        }
+        return null; // 本地找不到
+    }
+
+    async function manualUpdateCodeIndex() {
+        const btn = document.getElementById('refreshCacheBtn');
+        if (btn) { btn.disabled = true; btn.innerText = '更新中...'; }
+        try {
+            await loadCodeIndex();
+            if (localCacheLoaded) {
+                showToast(`代碼快取已更新 (${Object.keys(localCodeIndex).length} 筆)`);
+            } else {
+                alert('更新失敗');
+            }
+        } catch (e) {
+            alert('更新失敗: ' + e.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerText = '重新載入識別快取'; }
+        }
+    }
+    // ===== END 本地快取 =====
 
     function getCurrentInputCodeN(n) {
         const modeEl = useEl('useMode', n);
@@ -1527,7 +1605,7 @@
             const supEl = useEl('useSupplierSelect', n);
             const giftEl = useEl('useGiftSelect', n);
             if (supEl) supEl.value = "";
-            if (giftEl) giftEl.innerHTML = '<option value="">請選擇</option>';
+            if (giftEl) giftEl.innerHTML = '<option value="">\u8acb\u9078\u64c7</option>';
             const pb = useEl('previewBox', n);
             if (pb) pb.style.display = 'none';
         }
@@ -1538,7 +1616,7 @@
                 itemLastDetectedCodes[n] = code;
                 itemLastDetectInfos[n] = d;
                 if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = d; }
-                setDetectStatusN(n, 'found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : ''));
+                setDetectStatusN(n, 'found', `\u2713 \u5df2\u8b58\u5225: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `\uff08\u5165\u5eab\u4ee3\u78bc: ${d.matchedCode}\uff0c${d.strippedDigits >= 6 ? `\u5df2\u81ea\u52d5\u53d6\u5c3e ${d.strippedDigits} \u4f4d` : `\u5df2\u81ea\u52d5\u53bb\u9664\u5c3e\u78bc ${d.strippedDigits} \u4f4d`}\uff09` : ''));
                 applyLocalMatchN(n, d.supplier, d.giftName);
             } else {
                 itemLastDetectInfos[n] = null;
@@ -1548,6 +1626,19 @@
             return;
         }
 
+        // ★ 先嘗試本地識別（毫秒級）
+        const localResult = localDetectFromCache(code);
+        if (localResult) {
+            detectCache[code] = localResult;
+            itemLastDetectedCodes[n] = code;
+            itemLastDetectInfos[n] = localResult;
+            if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = localResult; }
+            setDetectStatusN(n, 'found', `\u2713 \u5df2\u8b58\u5225: ${localResult.supplier} / ${localResult.giftName}` + (localResult.strippedDigits ? `\uff08\u5165\u5eab\u4ee3\u78bc: ${localResult.matchedCode}\uff0c${localResult.strippedDigits >= 6 ? `\u5df2\u81ea\u52d5\u53d6\u5c3e ${localResult.strippedDigits} \u4f4d` : `\u5df2\u81ea\u52d5\u53bb\u9664\u5c3e\u78bc ${localResult.strippedDigits} \u4f4d`}\uff09` : ''));
+            applyLocalMatchN(n, localResult.supplier, localResult.giftName);
+            return;
+        }
+
+        // ★ 本地找不到，Fallback 到後端查詢
         setDetectStatusN(n, 'detecting');
         itemBackendDetectTimers[n] = setTimeout(() => {
             fetchWithRetry(`${API_URL}?action=detectInfoByCode&code=${encodeURIComponent(code)}`)
@@ -1558,7 +1649,7 @@
                         itemLastDetectedCodes[n] = code;
                         itemLastDetectInfos[n] = d;
                         if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = d; }
-                        setDetectStatusN(n, 'found', `✓ 已識別: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : ''));
+                        setDetectStatusN(n, 'found', `\u2713 \u5df2\u8b58\u5225: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `\uff08\u5165\u5eab\u4ee3\u78bc: ${d.matchedCode}\uff0c${d.strippedDigits >= 6 ? `\u5df2\u81ea\u52d5\u53d6\u5c3e ${d.strippedDigits} \u4f4d` : `\u5df2\u81ea\u52d5\u53bb\u9664\u5c3e\u78bc ${d.strippedDigits} \u4f4d`}\uff09` : ''));
                         applyLocalMatchN(n, d.supplier, d.giftName);
                     } else {
                         itemLastDetectInfos[n] = null;
@@ -1567,7 +1658,7 @@
                     }
                 })
                 .catch(() => {
-                    if (getCurrentInputCodeN(n) === code) setDetectStatusN(n, 'notfound', '✗ 識別查詢失敗（網絡問題），請手動選擇或重試');
+                    if (getCurrentInputCodeN(n) === code) setDetectStatusN(n, 'notfound', '\u2717 \u8b58\u5225\u67e5\u8a62\u5931\u6557\uff08\u7db2\u7d61\u554f\u984c\uff09\uff0c\u8acb\u624b\u52d5\u9078\u64c7\u6216\u91cd\u8a66');
                 });
         }, 400);
     }
