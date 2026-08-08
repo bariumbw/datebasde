@@ -1598,6 +1598,7 @@
 
     // ===== 代碼識別本地快取 =====
     let localCodeIndex = null; // { canonCode: {supplier, giftName, storedCode} }
+    let localUsedSet = null; // Set of canonCode that are used (U=已使用)
     let localCalcTypeMap = null; // { 'supplier|name': calcType }
     let localCacheLoaded = false;
 
@@ -1615,13 +1616,18 @@
             const res = await fetchWithRetry(`${API_URL}?action=getCodeIndex`);
             const data = await res.json();
             localCodeIndex = {};
+            localUsedSet = new Set();
             localCalcTypeMap = data.calcTypes || {};
-            // data.codes = [[supplier, giftName, code], ...]
+            // data.codes = [[supplier, giftName, code], ...] (未使用的)
             (data.codes || []).forEach(item => {
                 localCodeIndex[canonCodeLocal(item[2])] = { supplier: item[0], giftName: item[1], storedCode: item[2] };
             });
+            // data.usedCodes = [code, ...] (已使用的)
+            (data.usedCodes || []).forEach(code => {
+                localUsedSet.add(canonCodeLocal(code));
+            });
             localCacheLoaded = true;
-            console.log(`[代碼快取] 已載入 ${(data.codes || []).length} 筆代碼`);
+            console.log(`[代碼快取] 已載入 ${(data.codes || []).length} 筆未使用 + ${(data.usedCodes || []).length} 筆已使用`);
         } catch (e) {
             console.warn('[代碼快取] 載入失敗，將使用後端查詢', e);
         }
@@ -1870,7 +1876,37 @@
         const usageWarning = useEl('usageWarning', n);
         if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e6a700; font-weight:bold;">檢查中...</span>`;
         if (usageWarning) usageWarning.style.display = 'none';
-        
+
+        // ★ 如果本地快取已載入，直接本地檢查（不呼叫後端）
+        if (localCacheLoaded && localUsedSet) {
+            const usedCodes = [];
+            const notRegistered = [];
+            for (const c of codes) {
+                const canon = canonCodeLocal(c);
+                if (localUsedSet.has(canon)) {
+                    usedCodes.push(c);
+                } else if (!localCodeIndex[canon]) {
+                    notRegistered.push(c);
+                }
+            }
+            if (itemCurrentUseCodes[n] !== codes) return;
+            if (usedCodes.length > 0 && notRegistered.length > 0) {
+                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:red">偵測到重複代碼 (${usedCodes.length} 張)</span><br><span style="color:#e67e00;">不存在（未入庫）(${notRegistered.length} 張)</span>`;
+                if (usageWarning) { usageWarning.innerHTML = `<strong>警語：代碼 ${mergeConsecutiveCodes(usedCodes)} 已被登記使用過！確認要再登記？</strong><br><span style="color:#e67e00;">代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫）</span>`; usageWarning.style.display = 'block'; }
+            } else if (usedCodes.length > 0) {
+                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:red">偵測到重複代碼 (${usedCodes.length} 張)</span>`;
+                if (usageWarning) { usageWarning.innerHTML = `<strong>警語：代碼 ${mergeConsecutiveCodes(usedCodes)} 已被登記使用過！確認要再登記？</strong>`; usageWarning.style.display = 'block'; }
+            } else if (notRegistered.length > 0) {
+                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e67e00;">不存在（未入庫）(${notRegistered.length} 張)</span>`;
+                if (usageWarning) { usageWarning.innerHTML = `<span style="color:#e67e00;">代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫）</span>`; usageWarning.style.display = 'block'; }
+            } else {
+                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#28a745;">未使用</span>`;
+                if (usageWarning) usageWarning.style.display = 'none';
+            }
+            return;
+        }
+
+        // 快取未載入時才 fallback 到後端
         try {
             const res = await fetchWithRetry(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
             const data = await res.json();
