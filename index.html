@@ -612,7 +612,7 @@
 
 <script>
     // 請務必將此處更換為您的 Google Apps Script 部署網址
-    const API_URL = "https://script.google.com/macros/s/AKfycbzz1AHRjF9GsSbwwRYgQjMXc7ah4Jdz1G8zLbaKlsM1cCu6X1lm6i1oB_1DCUEUxZ2vmg/exec";
+    const API_URL = "https://script.google.com/macros/s/AKfycbz204lvAxrDQULeXu708KVDS_hmXRRQ6aEUNhH1QtJmQSkzOkHjISkJZbJ96S6TxeWORA/exec";
     
     let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
     let currentRole = 'Staff'; // 預設 Staff，登入後從後端取得
@@ -3515,10 +3515,13 @@
 
     // ===== 訂單記錄管理 (GiftStatus-based) =====
     let gsRecordsCache = [];
-    let gsCurrentType = '';
-    let gsCurrentPage = 1;
+    let gsUseCache = [];
+    let gsRegCache = [];
+    let gsUsePage = 1;
+    let gsRegPage = 1;
     const gsPageSize = 20;
     let gsMergeMode = false;
+    let gsMergedCache = [];
 
     async function gsLoadRecords() {
         showLoading();
@@ -3529,12 +3532,20 @@
             });
             gsRecordsCache = await res.json();
             if (!Array.isArray(gsRecordsCache)) gsRecordsCache = [];
+            // 分離使用和登記記錄
+            gsUseCache = gsRecordsCache.filter(r => r.type === '使用' || r.type === '退回');
+            gsRegCache = gsRecordsCache.filter(r => r.type === '登記');
             // 填充供應商下拉
-            const suppliers = [...new Set(gsRecordsCache.map(r => r.supplier))];
-            const sel = document.getElementById('gsFilterSupplier');
-            sel.innerHTML = '<option value="">全部供應商</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
-            gsCurrentPage = 1;
-            gsRenderRecords();
+            const useSuppliers = [...new Set(gsUseCache.map(r => r.supplier))];
+            const regSuppliers = [...new Set(gsRegCache.map(r => r.supplier))];
+            document.getElementById('gsUseFilterSupplier').innerHTML = '<option value="">全部供應商</option>' + useSuppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+            document.getElementById('gsRegFilterSupplier').innerHTML = '<option value="">全部供應商</option>' + regSuppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+            gsUsePage = 1;
+            gsRegPage = 1;
+            gsMergeMode = false;
+            gsMergedCache = [];
+            gsRenderUseRecords();
+            gsRenderRegRecords();
         } catch (e) {
             console.error('gsLoadRecords error:', e);
             alert('讀取訂單記錄失敗: ' + e.message);
@@ -3543,72 +3554,51 @@
         }
     }
 
-    function gsFilterByType(type) {
-        gsCurrentType = type;
-        document.querySelectorAll('#gsRecordsPage .tab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('gs-tab-' + (type === '使用' ? 'use' : type === '登記' ? 'reg' : type === '退回' ? 'return' : 'all')).classList.add('active');
-        gsCurrentPage = 1;
-        gsRenderRecords();
+    function gsGetUseFiltered() {
+        if (gsMergeMode && gsMergedCache.length > 0) {
+            let filtered = gsMergedCache;
+            const sup = document.getElementById('gsUseFilterSupplier').value;
+            if (sup) filtered = filtered.filter(r => r.supplier === sup);
+            return filtered;
+        }
+        let filtered = gsUseCache;
+        const sup = document.getElementById('gsUseFilterSupplier').value;
+        if (sup) filtered = filtered.filter(r => r.supplier === sup);
+        const user = document.getElementById('gsUseFilterUser').value.trim();
+        if (user) filtered = filtered.filter(r => r.user && r.user.includes(user));
+        const order = document.getElementById('gsUseFilterOrder').value.trim();
+        if (order) filtered = filtered.filter(r => r.orderNo && r.orderNo.includes(order));
+        const date = document.getElementById('gsUseFilterDate').value;
+        if (date) filtered = filtered.filter(r => r.time && r.time.startsWith(date));
+        const actFilter = document.getElementById('gsUseFilterActStatus').value;
+        if (actFilter === 'act') filtered = filtered.filter(r => r.actStatus === 'act');
+        else if (actFilter === 'unact') filtered = filtered.filter(r => r.actStatus === 'unact' || r.actStatus === 'part');
+        const rptFilter = document.getElementById('gsUseFilterReportMonth').value;
+        if (rptFilter === 'set') filtered = filtered.filter(r => r.rptMonth);
+        else if (rptFilter === 'unset') filtered = filtered.filter(r => !r.rptMonth);
+        return filtered;
     }
 
-    function gsRenderRecords() {
-        let filtered;
-        if (gsMergeMode && gsMergedCache.length > 0) {
-            // 合併模式：使用已合併的資料
-            filtered = gsMergedCache;
-            // 只套用供應商篩選
-            const sup = document.getElementById('gsFilterSupplier').value;
-            if (sup) filtered = filtered.filter(r => r.supplier === sup);
-        } else {
-            filtered = gsRecordsCache;
-            // 類型篩選
-            if (gsCurrentType) filtered = filtered.filter(r => r.type === gsCurrentType);
-            // 供應商
-            const sup = document.getElementById('gsFilterSupplier').value;
-            if (sup) filtered = filtered.filter(r => r.supplier === sup);
-            // 人員
-            const user = document.getElementById('gsFilterUser').value.trim();
-            if (user) filtered = filtered.filter(r => r.user && r.user.includes(user));
-            // 訂單號
-            const order = document.getElementById('gsFilterOrder').value.trim();
-            if (order) filtered = filtered.filter(r => r.orderNo && r.orderNo.includes(order));
-            // 日期
-            const date = document.getElementById('gsFilterDate').value;
-            if (date) filtered = filtered.filter(r => r.time && r.time.startsWith(date));
-            // 啟動狀態
-            const actFilter = document.getElementById('gsFilterActStatus').value;
-            if (actFilter === 'act') filtered = filtered.filter(r => r.actStatus === 'act' && r.type !== '登記');
-            else if (actFilter === 'unact') filtered = filtered.filter(r => (r.actStatus === 'unact' || r.actStatus === 'part') && r.type !== '登記');
-            else if (actFilter === 'na') filtered = filtered.filter(r => r.type === '登記');
-            // Report月份
-            const rptFilter = document.getElementById('gsFilterReportMonth').value;
-            if (rptFilter === 'set') filtered = filtered.filter(r => r.rptMonth);
-            else if (rptFilter === 'unset') filtered = filtered.filter(r => !r.rptMonth);
-        }
-
-        // 分頁
+    function gsRenderUseRecords() {
+        const filtered = gsGetUseFiltered();
         const totalPages = Math.max(1, Math.ceil(filtered.length / gsPageSize));
-        if (gsCurrentPage > totalPages) gsCurrentPage = totalPages;
-        const start = (gsCurrentPage - 1) * gsPageSize;
+        if (gsUsePage > totalPages) gsUsePage = totalPages;
+        const start = (gsUsePage - 1) * gsPageSize;
         const pageData = filtered.slice(start, start + gsPageSize);
-
-        const tbody = document.getElementById('gsRecordsBody');
+        const tbody = document.getElementById('gsUseBody');
         tbody.innerHTML = '';
         if (pageData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:#999; padding:20px;">無記錄</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#999; padding:20px;">無記錄</td></tr>';
         } else {
             pageData.forEach((r, idx) => {
                 const timeStr = r.time ? new Date(r.time).toLocaleString('zh-TW') : '';
-                const typeColor = r.type === '使用' ? 'color:#e17055' : (r.type === '登記' ? 'color:#00b894' : 'color:#6c5ce7');
-                const actHtml = r.type === '登記' ? '<span style="color:#999">不適用</span>' :
-                    (r.actStatus === 'act' ? '<span style="color:green">已啟動</span>' :
+                const actHtml = r.actStatus === 'act' ? '<span style="color:green">已啟動</span>' :
                     (r.actStatus === 'unact' ? '<span style="color:red">未啟動</span>' :
-                    '<span style="color:orange">部分未啟動(' + r.unactCount + ')</span>'));
+                    '<span style="color:orange">部分未啟動(' + r.unactCount + ')</span>');
                 const rptDisplay = r.rptMonth || '';
                 const globalIdx = start + idx;
                 tbody.innerHTML += `<tr>
                     <td style="font-size:11px">${timeStr}</td>
-                    <td style="${typeColor}; font-weight:600">${r.type}</td>
                     <td>${r.supplier}</td>
                     <td>${r.giftName}</td>
                     <td style="font-size:11px">${r.start}</td>
@@ -3619,53 +3609,90 @@
                     <td style="font-size:11px; color:green">${rptDisplay}</td>
                     <td>${actHtml}</td>
                     <td>
-                        ${r.actStatus !== 'act' && r.type !== '登記' ? `<button class="clear-btn" style="font-size:10px; background:#2563eb; color:#fff; border:none;" onclick="gsActivateRecord(${globalIdx})">啟用</button>` : ''}
-                        <button class="clear-btn" style="font-size:10px;" onclick="gsEditRptMonth(${globalIdx})">Report</button>
+                        ${r.actStatus !== 'act' ? `<button class="clear-btn" style="font-size:10px; background:#2563eb; color:#fff; border:none;" onclick="gsActivateUse(${globalIdx})">啟用</button>` : ''}
+                        <button class="clear-btn" style="font-size:10px;" onclick="gsEditUseRpt(${globalIdx})">Report</button>
                     </td>
                 </tr>`;
             });
         }
-
-        // 分頁器
-        const pager = document.getElementById('gsRecordsPager');
-        pager.innerHTML = `<span>第 ${gsCurrentPage}/${totalPages} 頁 (共 ${filtered.length} 筆)</span>`;
-        if (gsCurrentPage > 1) pager.innerHTML += `<button onclick="gsCurrentPage--;gsRenderRecords()" style="padding:3px 8px;">上一頁</button>`;
-        if (gsCurrentPage < totalPages) pager.innerHTML += `<button onclick="gsCurrentPage++;gsRenderRecords()" style="padding:3px 8px;">下一頁</button>`;
+        const pager = document.getElementById('gsUsePager');
+        pager.innerHTML = `<span>第 ${gsUsePage}/${totalPages} 頁 (共 ${filtered.length} 筆)</span>`;
+        if (gsUsePage > 1) pager.innerHTML += `<button onclick="gsUsePage--;gsRenderUseRecords()" style="padding:3px 8px;">上一頁</button>`;
+        if (gsUsePage < totalPages) pager.innerHTML += `<button onclick="gsUsePage++;gsRenderUseRecords()" style="padding:3px 8px;">下一頁</button>`;
     }
 
-    let gsMergedCache = [];
+    function gsGetRegFiltered() {
+        let filtered = gsRegCache;
+        const sup = document.getElementById('gsRegFilterSupplier').value;
+        if (sup) filtered = filtered.filter(r => r.supplier === sup);
+        const date = document.getElementById('gsRegFilterDate').value;
+        if (date) filtered = filtered.filter(r => r.time && r.time.startsWith(date));
+        const actFilter = document.getElementById('gsRegFilterActStatus').value;
+        if (actFilter === 'act') filtered = filtered.filter(r => r.actStatus === 'act');
+        else if (actFilter === 'unact') filtered = filtered.filter(r => r.actStatus === 'unact' || r.actStatus === 'part');
+        return filtered;
+    }
+
+    function gsRenderRegRecords() {
+        const filtered = gsGetRegFiltered();
+        const totalPages = Math.max(1, Math.ceil(filtered.length / gsPageSize));
+        if (gsRegPage > totalPages) gsRegPage = totalPages;
+        const start = (gsRegPage - 1) * gsPageSize;
+        const pageData = filtered.slice(start, start + gsPageSize);
+        const tbody = document.getElementById('gsRegBody');
+        tbody.innerHTML = '';
+        if (pageData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999; padding:20px;">無記錄</td></tr>';
+        } else {
+            pageData.forEach((r, idx) => {
+                const timeStr = r.time ? new Date(r.time).toLocaleString('zh-TW') : '';
+                const actHtml = r.actStatus === 'act' ? '<span style="color:green">已啟動</span>' :
+                    (r.actStatus === 'unact' ? '<span style="color:red">未啟動</span>' :
+                    '<span style="color:orange">部分未啟動(' + r.unactCount + ')</span>');
+                const globalIdx = start + idx;
+                tbody.innerHTML += `<tr>
+                    <td style="font-size:11px">${timeStr}</td>
+                    <td>${r.supplier}</td>
+                    <td>${r.giftName}</td>
+                    <td style="font-size:11px">${r.start}</td>
+                    <td style="font-size:11px">${r.end}</td>
+                    <td>${r.count}</td>
+                    <td>${actHtml}</td>
+                    <td>
+                        ${r.actStatus !== 'act' ? `<button class="clear-btn" style="font-size:10px; background:#2563eb; color:#fff; border:none;" onclick="gsActivateReg(${globalIdx})">啟用</button>` : ''}
+                    </td>
+                </tr>`;
+            });
+        }
+        const pager = document.getElementById('gsRegPager');
+        pager.innerHTML = `<span>第 ${gsRegPage}/${totalPages} 頁 (共 ${filtered.length} 筆)</span>`;
+        if (gsRegPage > 1) pager.innerHTML += `<button onclick="gsRegPage--;gsRenderRegRecords()" style="padding:3px 8px;">上一頁</button>`;
+        if (gsRegPage < totalPages) pager.innerHTML += `<button onclick="gsRegPage++;gsRenderRegRecords()" style="padding:3px 8px;">下一頁</button>`;
+    }
+
     function gsMergeUnactivated() {
         gsMergeMode = !gsMergeMode;
         if (gsMergeMode) {
-            // 真正合併：收集所有未啟動代碼，按供應商+項目分組，然後合併連續範圍
-            // 需要從後端取得未啟動代碼清單
             gsMergeFromCache();
         } else {
             gsMergedCache = [];
-            gsRenderRecords();
+            gsUsePage = 1;
+            gsRenderUseRecords();
         }
     }
 
     function gsMergeFromCache() {
-        // 從 gsRecordsCache 中找出所有未啟動/部分未啟動的記錄，合併同供應商+項目的連續代碼
-        // 後端已經回傳了 start/end，但我們需要從後端取得完整的未啟動代碼清單才能真正合併
-        // 簡化方案：在前端將同供應商+項目的未啟動記錄合併為一組，將所有代碼範圍合併為連續子範圍
-        const unactRecords = gsRecordsCache.filter(r => (r.actStatus === 'unact' || r.actStatus === 'part') && r.type === '使用');
-        // 按供應商+項目分組
+        const unactRecords = gsUseCache.filter(r => r.actStatus === 'unact' || r.actStatus === 'part');
         const groups = {};
         unactRecords.forEach(r => {
             const key = r.supplier + '|' + r.giftName;
             if (!groups[key]) groups[key] = { supplier: r.supplier, giftName: r.giftName, codes: [] };
-            // 展開範圍為代碼清單（簡化：用 start 和 end 作為範圍端點）
             groups[key].codes.push({ start: r.start, end: r.end, count: r.count });
         });
-        // 將每組的範圍排序並合併連續的
         gsMergedCache = [];
         Object.keys(groups).forEach(key => {
             const g = groups[key];
-            // 按 start 排序
             g.codes.sort((a, b) => a.start < b.start ? -1 : (a.start > b.start ? 1 : 0));
-            // 合併連續範圍：如果上一個 end 的數字+1 = 下一個 start 的數字，則合併
             const merged = [];
             g.codes.forEach(range => {
                 if (merged.length === 0) {
@@ -3673,13 +3700,11 @@
                     return;
                 }
                 const last = merged[merged.length - 1];
-                // 取出數字部分比較是否連續
                 const lastEndNum = parseInt(last.end.replace(/\D/g, ''));
                 const curStartNum = parseInt(range.start.replace(/\D/g, ''));
                 const lastPrefix = last.end.replace(/\d+$/, '');
                 const curPrefix = range.start.replace(/\d+$/, '');
                 if (lastPrefix === curPrefix && curStartNum === lastEndNum + 1) {
-                    // 連續，合併
                     last.end = range.end;
                     last.count += range.count;
                 } else {
@@ -3694,12 +3719,12 @@
                 });
             });
         });
-        gsCurrentPage = 1;
-        gsRenderRecords();
+        gsUsePage = 1;
+        gsRenderUseRecords();
     }
 
-    async function gsActivateRecord(idx) {
-        const filtered = gsGetFilteredList();
+    async function gsActivateUse(idx) {
+        const filtered = gsGetUseFiltered();
         const r = filtered[idx];
         if (!r) return;
         if (!confirm(`確定要啟用 ${r.supplier} - ${r.giftName}\n${r.start} ~ ${r.end} (共 ${r.count} 張)？`)) return;
@@ -3723,8 +3748,33 @@
         }
     }
 
-    async function gsEditRptMonth(idx) {
-        const filtered = gsGetFilteredList();
+    async function gsActivateReg(idx) {
+        const filtered = gsGetRegFiltered();
+        const r = filtered[idx];
+        if (!r) return;
+        if (!confirm(`確定要啟用 ${r.supplier} - ${r.giftName}\n${r.start} ~ ${r.end} (共 ${r.count} 張)？`)) return;
+        showLoading();
+        try {
+            const res = await fetchWithRetry(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({ mode: 'activate', start: r.start, end: r.end })
+            });
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast('啟用成功');
+                gsLoadRecords();
+            } else {
+                alert('啟用失敗: ' + (data.message || ''));
+            }
+        } catch (e) {
+            alert('啟用失敗: ' + e.message);
+        } finally {
+            hideLoading();
+        }
+    }
+
+    async function gsEditUseRpt(idx) {
+        const filtered = gsGetUseFiltered();
         const r = filtered[idx];
         if (!r) return;
         const currentVal = r.rptMonth || '';
@@ -3742,7 +3792,7 @@
             <div style="margin-top:10px; display:flex; gap:6px; align-items:center;">
                 <select id="gsRptYear" style="padding:4px;">${yearOpts}</select>
                 <select id="gsRptMonth" style="padding:4px;">${monthOpts}</select>
-                <button onclick="gsSubmitRptMonth(${idx})" style="padding:4px 12px; background:var(--dark-pink); color:#fff; border:none; border-radius:4px; cursor:pointer;">確認</button>
+                <button onclick="gsSubmitUseRpt(${idx})" style="padding:4px 12px; background:var(--dark-pink); color:#fff; border:none; border-radius:4px; cursor:pointer;">確認</button>
                 <button onclick="document.getElementById('gsRptModal').remove()" style="padding:4px 12px; background:#999; color:#fff; border:none; border-radius:4px; cursor:pointer;">取消</button>
             </div></div>`;
         const modal = document.createElement('div');
@@ -3752,8 +3802,8 @@
         document.body.appendChild(modal);
     }
 
-    async function gsSubmitRptMonth(idx) {
-        const filtered = gsGetFilteredList();
+    async function gsSubmitUseRpt(idx) {
+        const filtered = gsGetUseFiltered();
         const r = filtered[idx];
         if (!r) return;
         const year = document.getElementById('gsRptYear').value;
@@ -3764,7 +3814,6 @@
         if (modal) modal.remove();
         showLoading();
         try {
-            // 更新 GiftStatus T欄: 用訂單號找到所有代碼並更新
             const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
                 body: JSON.stringify({ mode: 'updateGsReportMonth', orderNo: r.orderNo, supplier: r.supplier, giftName: r.giftName, reportMonth: rptMonth })
@@ -3773,7 +3822,7 @@
             if (data.result === 'success') {
                 showToast('Report月份已更新');
                 r.rptMonth = rptMonth;
-                gsRenderRecords();
+                gsRenderUseRecords();
             } else {
                 alert('更新失敗: ' + (data.message || ''));
             }
@@ -3782,33 +3831,6 @@
         } finally {
             hideLoading();
         }
-    }
-
-    function gsGetFilteredList() {
-        if (gsMergeMode && gsMergedCache.length > 0) {
-            let filtered = gsMergedCache;
-            const sup = document.getElementById('gsFilterSupplier').value;
-            if (sup) filtered = filtered.filter(r => r.supplier === sup);
-            return filtered;
-        }
-        let filtered = gsRecordsCache;
-        if (gsCurrentType) filtered = filtered.filter(r => r.type === gsCurrentType);
-        const sup = document.getElementById('gsFilterSupplier').value;
-        if (sup) filtered = filtered.filter(r => r.supplier === sup);
-        const user = document.getElementById('gsFilterUser').value.trim();
-        if (user) filtered = filtered.filter(r => r.user && r.user.includes(user));
-        const order = document.getElementById('gsFilterOrder').value.trim();
-        if (order) filtered = filtered.filter(r => r.orderNo && r.orderNo.includes(order));
-        const date = document.getElementById('gsFilterDate').value;
-        if (date) filtered = filtered.filter(r => r.time && r.time.startsWith(date));
-        const actFilter = document.getElementById('gsFilterActStatus').value;
-        if (actFilter === 'act') filtered = filtered.filter(r => r.actStatus === 'act' && r.type !== '登記');
-        else if (actFilter === 'unact') filtered = filtered.filter(r => (r.actStatus === 'unact' || r.actStatus === 'part') && r.type !== '登記');
-        else if (actFilter === 'na') filtered = filtered.filter(r => r.type === '登記');
-        const rptFilter = document.getElementById('gsFilterReportMonth').value;
-        if (rptFilter === 'set') filtered = filtered.filter(r => r.rptMonth);
-        else if (rptFilter === 'unset') filtered = filtered.filter(r => !r.rptMonth);
-        return filtered;
     }
 
     async function backfillReportMonthToGS() {
@@ -3834,4 +3856,3 @@
 </script>
 </body>
 </html>
-
