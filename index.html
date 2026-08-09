@@ -2014,11 +2014,31 @@
             }
         }
 
-        // 如果任一品項有重複代碼警告，彈出確認框
-        const anyDup = itemsToSubmit.some(it => it.hasDup);
-        if (anyDup) {
-            const confirmMsg = "偵測到部分品項有重複代碼，確定要繼續登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)";
-            if (!confirm(confirmMsg)) return;
+        // ★ 即時查詢 checkUsageQuick（確保即時性，防止同事重複出庫）
+        const verifyEl2 = document.getElementById('useVerifyStatus');
+        const useBtn2 = document.getElementById('finalUseBtn');
+        verifyEl2.textContent = '✱ 即時驗證使用狀態...';
+        verifyEl2.style.display = 'block';
+        useBtn2.disabled = true;
+        try {
+            const allCodesToCheck = itemsToSubmit.flatMap(it => it.codes);
+            const quickRes = await fetchWithRetry(`${API_URL}?action=checkUsageQuick&codes=${encodeURIComponent(JSON.stringify(allCodesToCheck))}`);
+            const quickData = await quickRes.json();
+            verifyEl2.style.display = 'none';
+            useBtn2.disabled = false;
+            if (quickData.usedCodes && quickData.usedCodes.length > 0) {
+                const confirmMsg = `即時驗證發現 ${quickData.usedCodes.length} 個代碼已被使用：\n${mergeConsecutiveCodes(quickData.usedCodes)}\n\n確定要再次登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)`;
+                if (!confirm(confirmMsg)) return;
+            }
+        } catch (err) {
+            verifyEl2.style.display = 'none';
+            useBtn2.disabled = false;
+            // 即時驗證失敗時，用預覽結果作為 fallback
+            const anyDup = itemsToSubmit.some(it => it.hasDup);
+            if (anyDup) {
+                const confirmMsg = "偵測到部分品項有重複代碼，確定要繼續登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)";
+                if (!confirm(confirmMsg)) return;
+            }
         }
 
         // 清空表單（全部品項）並重新套用預設值
