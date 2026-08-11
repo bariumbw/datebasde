@@ -120,6 +120,7 @@
                 <button id="nav-returnSupplierPage" class="nav-btn" onclick="switchPage('returnSupplierPage')">退回商戶 (出庫)</button>
                 <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
                 <button id="nav-gsRecordsPage" class="nav-btn" onclick="switchPage('gsRecordsPage')">訂單記錄管理</button>
+                <button id="nav-dailyReportPage" class="nav-btn" onclick="switchPage('dailyReportPage')">每日報告</button>
             </nav>
 
             <!-- 統計儀表板 -->
@@ -577,6 +578,20 @@
                     <div id="gsRegPager" style="display:flex; justify-content:center; align-items:center; gap:6px; margin-top:15px; flex-wrap:wrap;"></div>
                 </div>
             </div>
+
+            <!-- 每日報告 -->
+            <div id="dailyReportPage" class="page">
+                <h2>每日報告</h2>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:15px;">
+                    <label>日期：<input type="date" id="drDate" style="padding:5px 8px; border:1px solid #ccc; border-radius:6px;"></label>
+                    <label>供應商：<select id="drSupplier" style="padding:5px 8px; border:1px solid #ccc; border-radius:6px;"><option value="">全部</option></select></label>
+                    <label>項目：<select id="drGift" style="padding:5px 8px; border:1px solid #ccc; border-radius:6px;"><option value="">全部</option></select></label>
+                    <button class="btn" onclick="loadDailyReport()" style="padding:8px 16px; background:#0071e3; color:#fff; border:none; border-radius:6px; cursor:pointer;">查詢</button>
+                </div>
+                <div id="drLoading" style="display:none; color:#666;">載入中...</div>
+                <div id="drContent"></div>
+            </div>
+
         </div>
     </div>
 
@@ -626,6 +641,175 @@
         problem: [],
         solved: []
     };
+
+    // ===== V3.7.5 離線緩衝模式 =====
+    let isOfflineMode = false;
+    let offlineQueue = []; // 離線期間的所有操作佇列
+    let interruptedTasks = []; // 斷網前未完成的任務
+
+    function loadOfflineQueue() {
+        try {
+            const saved = localStorage.getItem('offlineQueue');
+            if (saved) offlineQueue = JSON.parse(saved);
+            const interrupted = localStorage.getItem('interruptedTasks');
+            if (interrupted) interruptedTasks = JSON.parse(interrupted);
+        } catch (e) { offlineQueue = []; interruptedTasks = []; }
+    }
+    function saveOfflineQueue() {
+        localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
+        localStorage.setItem('interruptedTasks', JSON.stringify(interruptedTasks));
+    }
+
+    function addToOfflineQueue(task) {
+        task.id = task.id || generateProcessId();
+        task.timestamp = new Date().toISOString();
+        task.status = 'pending';
+        offlineQueue.push(task);
+        saveOfflineQueue();
+        updateOfflineBanner();
+    }
+
+    function enterOfflineMode() {
+        isOfflineMode = true;
+        // 儲存當前處理中的任務到 interruptedTasks
+        processingStatuses.processing.forEach(task => {
+            if (task.retryPayload) {
+                interruptedTasks.push({
+                    id: task.id,
+                    type: task.orderNo.startsWith('入庫') ? 'register' : (task.orderNo.includes('退回') ? 'return' : 'use'),
+                    payload: task.retryPayload,
+                    description: `${task.supplier} - ${task.gift} (${task.count}張)`,
+                    orderNo: task.orderNo,
+                    timestamp: task.startTime
+                });
+            }
+        });
+        saveOfflineQueue();
+        updateOfflineBanner();
+        showToast('✈️ 已切換至離線模式，操作將暫存本地');
+    }
+
+    function exitOfflineMode() {
+        isOfflineMode = false;
+        updateOfflineBanner();
+        // 自動同步
+        syncOfflineQueue();
+    }
+
+    function updateOfflineBanner() {
+        let banner = document.getElementById('offlineBanner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'offlineBanner';
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 20px;text-align:center;font-weight:600;font-size:14px;display:none;';
+            document.body.prepend(banner);
+        }
+        if (isOfflineMode) {
+            const queueCount = offlineQueue.filter(q => q.status === 'pending').length;
+            banner.style.display = 'block';
+            banner.style.background = '#fff3cd';
+            banner.style.color = '#856404';
+            banner.style.borderBottom = '2px solid #ffc107';
+            banner.innerHTML = `⚠️ 離線模式（本地快取驗證）| 待同步: ${queueCount} 筆 | <button onclick="manualSyncOffline()" style="padding:3px 10px;border:1px solid #856404;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;">嘗試重新連線</button>`;
+        } else if (offlineQueue.filter(q => q.status === 'pending').length > 0) {
+            banner.style.display = 'block';
+            banner.style.background = '#d4edda';
+            banner.style.color = '#155724';
+            banner.style.borderBottom = '2px solid #28a745';
+            banner.innerHTML = `✅ 網路已恢復，正在同步離線操作... (剩餘 ${offlineQueue.filter(q => q.status === 'pending').length} 筆)`;
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+
+    async function syncOfflineQueue() {
+        const pendingTasks = offlineQueue.filter(q => q.status === 'pending');
+        const pendingInterrupted = [...interruptedTasks];
+        if (pendingTasks.length === 0 && pendingInterrupted.length === 0) {
+            updateOfflineBanner();
+            return;
+        }
+        updateOfflineBanner();
+
+        // 先處理中斷的任務
+        for (const task of pendingInterrupted) {
+            try {
+                const res = await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(task.payload) });
+                const data = await res.json();
+                if (data.result === 'success') {
+                    interruptedTasks = interruptedTasks.filter(t => t.id !== task.id);
+                    showToast(`中斷任務已恢復: ${task.description}`);
+                }
+            } catch (e) {
+                console.warn('中斷任務同步失敗:', e.message);
+                break; // 網路又斷了
+            }
+        }
+
+        // 處理離線佇列
+        for (const task of pendingTasks) {
+            try {
+                task.status = 'syncing';
+                saveOfflineQueue();
+                const res = await fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(task.payload) });
+                const data = await res.json();
+                if (data.result === 'success') {
+                    task.status = 'synced';
+                    task.syncTime = new Date().toISOString();
+                    showToast(`離線任務已同步: ${task.description}`);
+                } else {
+                    task.status = 'error';
+                    task.errorMsg = data.message || '同步失敗';
+                }
+            } catch (e) {
+                task.status = 'pending'; // 網路又斷了，改回 pending
+                console.warn('離線任務同步失敗:', e.message);
+                break;
+            }
+            saveOfflineQueue();
+            updateOfflineBanner();
+        }
+
+        saveOfflineQueue();
+        // 同步完成後重新載入快取
+        if (offlineQueue.filter(q => q.status === 'pending').length === 0) {
+            updateOfflineBanner();
+            loadCodeIndex(); // 重新載入代碼快取
+            showToast('✅ 所有離線操作已同步完成');
+            // 清除已同步的
+            setTimeout(() => {
+                offlineQueue = offlineQueue.filter(q => q.status !== 'synced');
+                interruptedTasks = [];
+                saveOfflineQueue();
+            }, 5000);
+        }
+    }
+
+    function manualSyncOffline() {
+        if (navigator.onLine) {
+            exitOfflineMode();
+        } else {
+            showToast('仍然無法連線，請檢查網路');
+        }
+    }
+
+    // 網路狀態偵測
+    window.addEventListener('offline', function() {
+        if (!isOfflineMode) {
+            if (confirm('❗ 偵測到網路已斷開\n\n是否切換到離線模式？\n（將使用本地快取驗證，操作暫存本地，恢復網路後自動同步）')) {
+                enterOfflineMode();
+            }
+        }
+    });
+    window.addEventListener('online', function() {
+        if (isOfflineMode) {
+            showToast('🌐 網路已恢復，正在自動同步...');
+            exitOfflineMode();
+        }
+    });
+    // 頁面載入時恢復離線佇列
+    loadOfflineQueue();
+    // ===== END 離線緩衝模式 =====
 
     // 全局 fetch 重試包裝器：處理 GAS 冷啟動超時和間歇性錯誤
     // POST 請求（寫入操作）不重試，避免重複寫入
@@ -834,6 +1018,7 @@
         if(p === 'gsRecordsPage') gsLoadRecords();
         if(p === 'statsPage') loadStats();
         if(p === 'eGiftPage') loadEGiftPending();
+        if(p === 'dailyReportPage') initDailyReportPage();
     }
 
     async function loadStats(showLoader) {
@@ -1601,6 +1786,7 @@
     let localUsedSet = null; // Set of canonCode that are used (U=已使用)
     let localCalcTypeMap = null; // { 'supplier|name': calcType }
     let localCacheLoaded = false;
+    let lastCacheTime = null; // 上次快取更新時間（用於增量更新）
 
     function canonCodeLocal(v) {
         var s = (v === null || v === undefined) ? '' : v.toString().trim();
@@ -1618,19 +1804,60 @@
             localCodeIndex = {};
             localUsedSet = new Set();
             localCalcTypeMap = data.calcTypes || {};
-            // data.codes = [[supplier, giftName, code], ...] (未使用的)
             (data.codes || []).forEach(item => {
                 localCodeIndex[canonCodeLocal(item[2])] = { supplier: item[0], giftName: item[1], storedCode: item[2] };
             });
-            // data.usedCodes = [code, ...] (已使用的)
             (data.usedCodes || []).forEach(code => {
                 localUsedSet.add(canonCodeLocal(code));
             });
             localCacheLoaded = true;
-            console.log(`[代碼快取] 已載入 ${(data.codes || []).length} 筆未使用 + ${(data.usedCodes || []).length} 筆已使用`);
+            lastCacheTime = new Date().toISOString();
+            localStorage.setItem('lastCacheTime', lastCacheTime);
+            console.log(`[代碼快取] 全量載入 ${(data.codes || []).length} 筆未使用 + ${(data.usedCodes || []).length} 筆已使用`);
         } catch (e) {
             console.warn('[代碼快取] 載入失敗，將使用後端查詢', e);
         }
+    }
+
+    // V3.7.5 增量更新：只載入上次更新後變動的代碼（極快）
+    async function incrementalUpdateCache() {
+        if (!localCacheLoaded || !lastCacheTime) {
+            return await loadCodeIndex(); // 首次載入用全量
+        }
+        try {
+            const res = await fetchWithRetry(`${API_URL}?action=getCodeIndexDelta&since=${encodeURIComponent(lastCacheTime)}`);
+            const data = await res.json();
+            let addedCount = 0;
+            // 新增未使用的代碼
+            (data.newCodes || []).forEach(item => {
+                const canon = canonCodeLocal(item[2]);
+                localCodeIndex[canon] = { supplier: item[0], giftName: item[1], storedCode: item[2] };
+                localUsedSet.delete(canon); // 如果之前在 usedSet，移除（退回的情況）
+                addedCount++;
+            });
+            // 新增已使用的代碼
+            (data.newUsed || []).forEach(code => {
+                const canon = canonCodeLocal(code);
+                localUsedSet.add(canon);
+                delete localCodeIndex[canon]; // 從未使用中移除
+            });
+            lastCacheTime = data.serverTime || new Date().toISOString();
+            localStorage.setItem('lastCacheTime', lastCacheTime);
+            console.log(`[代碼快取] 增量更新: +${addedCount} 筆新代碼, +${(data.newUsed || []).length} 筆已使用`);
+            return addedCount + (data.newUsed || []).length;
+        } catch (e) {
+            console.warn('[代碼快取] 增量更新失敗', e);
+        }
+    }
+
+    // V3.7.5 自動更新：操作完成後自動增量更新快取
+    function autoRefreshCache() {
+        if (isOfflineMode) return; // 離線模式不自動更新
+        setTimeout(() => {
+            incrementalUpdateCache().then(count => {
+                if (count > 0) showToast(`快取已自動更新 (+${count} 筆變動)`);
+            });
+        }, 3000); // 等 3 秒讓後端寫入完成
     }
 
     function localDetectFromCache(rawCode) {
@@ -1665,11 +1892,18 @@
         const btn = document.getElementById('refreshCacheBtn');
         if (btn) { btn.disabled = true; btn.innerText = '更新中...'; }
         try {
-            await loadCodeIndex();
-            if (localCacheLoaded) {
-                showToast(`代碼快取已更新 (${Object.keys(localCodeIndex).length} 筆)`);
+            if (localCacheLoaded && lastCacheTime) {
+                // 已有快取：用增量更新（極快）
+                const count = await incrementalUpdateCache();
+                showToast(`快取已增量更新 (${count || 0} 筆變動，總計 ${Object.keys(localCodeIndex).length} 筆)`);
             } else {
-                alert('更新失敗');
+                // 首次：全量載入
+                await loadCodeIndex();
+                if (localCacheLoaded) {
+                    showToast(`代碼快取已全量載入 (${Object.keys(localCodeIndex).length} 筆)`);
+                } else {
+                    alert('更新失敗');
+                }
             }
         } catch (e) {
             alert('更新失敗: ' + e.message);
@@ -1877,31 +2111,38 @@
         if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e6a700; font-weight:bold;">檢查中...</span>`;
         if (usageWarning) usageWarning.style.display = 'none';
 
-        // ★ 如果本地快取已載入，直接本地檢查（不呼叫後端）
-        if (localCacheLoaded && localUsedSet) {
-            const usedCodes = [];
+        // ★ 如果本地快取已載入，直接本地檢查（僅顯示資訊，不阻擋出庫）
+        if (localCacheLoaded && localCodeIndex) {
             const notRegistered = [];
+            const alreadyUsed = [];
             for (const c of codes) {
                 const canon = canonCodeLocal(c);
-                if (localUsedSet.has(canon)) {
-                    usedCodes.push(c);
-                } else if (!localCodeIndex[canon]) {
+                if (!localCodeIndex[canon]) {
                     notRegistered.push(c);
+                } else if (localUsedSet && localUsedSet.has(canon)) {
+                    alreadyUsed.push(c);
                 }
             }
             if (itemCurrentUseCodes[n] !== codes) return;
-            if (usedCodes.length > 0 && notRegistered.length > 0) {
-                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:red">偵測到重複代碼 (${usedCodes.length} 張)</span><br><span style="color:#e67e00;">不存在（未入庫）(${notRegistered.length} 張)</span>`;
-                if (usageWarning) { usageWarning.innerHTML = `<strong>警語：代碼 ${mergeConsecutiveCodes(usedCodes)} 已被登記使用過！確認要再登記？</strong><br><span style="color:#e67e00;">代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫）</span>`; usageWarning.style.display = 'block'; }
-            } else if (usedCodes.length > 0) {
-                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:red">偵測到重複代碼 (${usedCodes.length} 張)</span>`;
-                if (usageWarning) { usageWarning.innerHTML = `<strong>警語：代碼 ${mergeConsecutiveCodes(usedCodes)} 已被登記使用過！確認要再登記？</strong>`; usageWarning.style.display = 'block'; }
-            } else if (notRegistered.length > 0) {
-                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e67e00;">不存在（未入庫）(${notRegistered.length} 張)</span>`;
-                if (usageWarning) { usageWarning.innerHTML = `<span style="color:#e67e00;">代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫）</span>`; usageWarning.style.display = 'block'; }
-            } else {
-                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#28a745;">未使用</span>`;
-                if (usageWarning) usageWarning.style.display = 'none';
+            let statusHtml = '';
+            if (notRegistered.length > 0) {
+                statusHtml += `<span style="color:#e67e00;">不存在（未入庫）(${notRegistered.length} 張)</span>`;
+            }
+            if (alreadyUsed.length > 0) {
+                if (statusHtml) statusHtml += ' | ';
+                statusHtml += `<span style="color:#2196F3;">已使用過 (${alreadyUsed.length} 張)</span>`;
+            }
+            if (!statusHtml) {
+                statusHtml = `<span style="color:#28a745;">已識別 (未使用)</span>`;
+            }
+            if (pUsageStatus) pUsageStatus.innerHTML = statusHtml;
+            if (usageWarning) {
+                if (notRegistered.length > 0) {
+                    usageWarning.innerHTML = `<span style="color:#e67e00;">代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫）</span>`;
+                    usageWarning.style.display = 'block';
+                } else {
+                    usageWarning.style.display = 'none';
+                }
             }
             return;
         }
@@ -1973,73 +2214,8 @@
             itemsToSubmit.push({ n, codes, match, hasDup });
         }
 
-        // 使用狀態檢查：根據預覽時的結果判斷
-        const verifyEl = document.getElementById('useVerifyStatus');
-        const useBtn = document.getElementById('finalUseBtn');
-
-        // 如果預覽還在檢查中，等待完成後自動繼續
-        let stillChecking = itemsToSubmit.some(item => {
-            const statusEl = useEl('pUsageStatus', item.n);
-            const t = statusEl ? statusEl.textContent : '';
-            return t.includes('檢查中') || t.includes('讀取中');
-        });
-        if (stillChecking) {
-            verifyEl.textContent = '✱ 待完成使用狀態檢查...';
-            verifyEl.style.display = 'block';
-            useBtn.disabled = true;
-            // 每 500ms 檢查一次，最多等 60 秒
-            let waited = 0;
-            while (waited < 60000) {
-                await new Promise(r => setTimeout(r, 500));
-                waited += 500;
-                stillChecking = itemsToSubmit.some(item => {
-                    const statusEl = useEl('pUsageStatus', item.n);
-                    const t = statusEl ? statusEl.textContent : '';
-                    return t.includes('檢查中') || t.includes('讀取中');
-                });
-                if (!stillChecking) break;
-            }
-            if (stillChecking) {
-                verifyEl.textContent = '✱ 使用狀態檢查逾時，請重試';
-                useBtn.disabled = false;
-                setTimeout(() => { verifyEl.style.display = 'none'; }, 3000);
-                return;
-            }
-            verifyEl.style.display = 'none';
-            useBtn.disabled = false;
-            // 重新檢查 hasDup（因為等待期間可能已更新）
-            for (const item of itemsToSubmit) {
-                const warningEl = useEl('usageWarning', item.n);
-                item.hasDup = warningEl && warningEl.style.display === 'block';
-            }
-        }
-
-        // ★ 即時查詢 checkUsageQuick（確保即時性，防止同事重複出庫）
-        const verifyEl2 = document.getElementById('useVerifyStatus');
-        const useBtn2 = document.getElementById('finalUseBtn');
-        verifyEl2.textContent = '✱ 即時驗證使用狀態...';
-        verifyEl2.style.display = 'block';
-        useBtn2.disabled = true;
-        try {
-            const allCodesToCheck = itemsToSubmit.flatMap(it => it.codes);
-            const quickRes = await fetchWithRetry(`${API_URL}?action=checkUsageQuick&codes=${encodeURIComponent(JSON.stringify(allCodesToCheck))}`);
-            const quickData = await quickRes.json();
-            verifyEl2.style.display = 'none';
-            useBtn2.disabled = false;
-            if (quickData.usedCodes && quickData.usedCodes.length > 0) {
-                const confirmMsg = `即時驗證發現 ${quickData.usedCodes.length} 個代碼已被使用：\n${mergeConsecutiveCodes(quickData.usedCodes)}\n\n確定要再次登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)`;
-                if (!confirm(confirmMsg)) return;
-            }
-        } catch (err) {
-            verifyEl2.style.display = 'none';
-            useBtn2.disabled = false;
-            // 即時驗證失敗時，用預覽結果作為 fallback
-            const anyDup = itemsToSubmit.some(it => it.hasDup);
-            if (anyDup) {
-                const confirmMsg = "偵測到部分品項有重複代碼，確定要繼續登記嗎？\n(此操作將保留原資料，並在 J, K, L 欄位記錄二次資訊)";
-                if (!confirm(confirmMsg)) return;
-            }
-        }
+        // V3.7.5: 不檢查使用狀態，已使用不影響再出庫（第1次→G/H/I，第2次→J/K/L，第3次→V/W/X）
+        // 直接通過，不做任何使用狀態驗證
 
         // 清空表單（全部品項）並重新套用預設值
         document.getElementById('useOrderNo').value = "";
@@ -2105,37 +2281,60 @@
                     reportMonth: reportMonth
                 }
             };
-            addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1], usePayload);
 
-            // 非同步提交（不阻擋下一個品項的提交）
-            (async () => {
-                try {
-                    const res = await fetchWithRetry(API_URL, { 
-                        method: "POST", 
-                        body: JSON.stringify(usePayload) 
-                    });
-                    const data = await res.json();
-                    if (data.result === "success") {
-                        updateProcessingStatus(processId, 'completed', startTime);
-                        showToast("已完成記錄");
-                        loadStats(false);
-                        // 如果是從問題項目載入的，成功後標記原問題為已解決並清除橫幅
-                        if (currentProblemItem) {
-                            const origP = currentProblemItem.problem;
-                            processingStatuses.processing.push(origP);
-                            updateProcessingStatus(origP.id, 'solved', origP.startTime, origP.errorMsg || '');
-                            currentProblemItem = null;
-                            document.getElementById('problemItemBanner').style.display = 'none';
-                            document.getElementById('problemItemInfo').textContent = '';
+            if (isOfflineMode) {
+                // 離線模式：存入本地佇列，更新本地快取
+                addToOfflineQueue({
+                    type: 'use',
+                    payload: usePayload,
+                    description: `出庫: ${match.supplier} - ${match.name} (${codes.length}張) 訂單:${orderNo}`,
+                    codes: codes,
+                    orderNo: orderNo,
+                    supplier: match.supplier,
+                    gift: match.name,
+                    channel: channel,
+                    reportMonth: reportMonth,
+                    user: currentUser
+                });
+                // 更新本地快取：標記為已使用
+                codes.forEach(c => {
+                    const canon = canonCodeLocal(c);
+                    if (localUsedSet) localUsedSet.add(canon);
+                    if (localCodeIndex) delete localCodeIndex[canon];
+                });
+                showToast(`離線模式: 已暫存出庫記錄 (${codes.length}張)`);
+            } else {
+                addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1], usePayload, 'outbound', codes);
+
+                // 非同步提交（不阻擋下一個品項的提交）
+                (async () => {
+                    try {
+                        const res = await fetchWithRetry(API_URL, { 
+                            method: "POST", 
+                            body: JSON.stringify(usePayload) 
+                        });
+                        const data = await res.json();
+                        if (data.result === "success") {
+                            updateProcessingStatus(processId, 'completed', startTime);
+                            showToast("已完成記錄");
+                            loadStats(false);
+                            autoRefreshCache(); // V3.7.5 自動增量更新快取
+                            if (currentProblemItem) {
+                                const origP = currentProblemItem.problem;
+                                processingStatuses.processing.push(origP);
+                                updateProcessingStatus(origP.id, 'solved', origP.startTime, origP.errorMsg || '');
+                                currentProblemItem = null;
+                                document.getElementById('problemItemBanner').style.display = 'none';
+                                document.getElementById('problemItemInfo').textContent = '';
+                            }
+                        } else { 
+                            throw new Error(data.message); 
                         }
-                    } else { 
-                        throw new Error(data.message); 
+                    } catch (err) { 
+                        updateProcessingStatus(processId, 'problem', startTime, err.message);
                     }
-                } catch (err) { 
-                    updateProcessingStatus(processId, 'problem', startTime, err.message);
-                    // 失敗時橫幅保留，新任務已在問題清單中
-                }
-            })();
+                })();
+            }
         }
     }
 
@@ -2252,7 +2451,7 @@
 
     const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
-    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload) {
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes) {
         processingStatuses.processing.push({
             id: id,
             orderNo: orderNo,
@@ -2264,7 +2463,9 @@
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
             user: currentUser || '',
-            retryPayload: retryPayload || null
+            retryPayload: retryPayload || null,
+            sourceType: sourceType || 'outbound',
+            allCodes: allCodes || []
         });
         updateStatusDisplay();
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
@@ -2303,7 +2504,9 @@
             status: newStatus,
             codeStart: item.codeStart || '',
             codeEnd: item.codeEnd || '',
-            retryPayload: item.retryPayload || null
+            retryPayload: item.retryPayload || null,
+            sourceType: item.sourceType || 'outbound',
+            allCodes: item.allCodes || []
         };
 
         if (newStatus === 'completed') {
@@ -2347,57 +2550,95 @@
         const problem = processingStatuses.problem.find(p => p.id === id);
         if (!problem || !problem.retryPayload) { alert('無法載入：缺少任務資料'); return; }
         const payload = problem.retryPayload;
-        const info = payload.recordInfo || {};
-        
-        // 切換到出庫頁面
-        switchPage('usePage');
-        
-        // 填入訂單號
-        document.getElementById('useOrderNo').value = info.orderNo || '';
-        
-        // 填入供應商和項目
-        const supEl = useEl('useSupplierSelect', 0);
-        if (supEl) supEl.value = info.supplier || '';
-        useUpdateGiftSelectN(0, info.gift || '');
-        
-        // 填入代碼範圍
-        const startEl = useEl('useStart', 0);
-        const endEl = useEl('useEnd', 0);
-        if (startEl) startEl.value = info.start || '';
-        if (endEl) endEl.value = info.end || '';
-        
-        // 觸發識別和數量計算
-        if (startEl && startEl.value) {
-            useSmartDetectDebouncedN(0);
-            useUpdateRangeCountN(0);
-        }
-        
-        // 填入購買渠道
-        if (info.channel) {
-            const channelRadio = document.querySelector(`input[name="useChannel"][value="${info.channel}"]`);
-            if (channelRadio) channelRadio.checked = true;
-        }
-        
-        // 填入 Report 月份
-        if (info.reportMonth) {
-            const parts = info.reportMonth.split('-');
-            if (parts.length === 2) {
-                document.getElementById('useReportYear').value = parts[0];
-                document.getElementById('useReportMonth').value = parts[1];
+        const src = problem.sourceType || 'outbound';
+        const allCodes = problem.allCodes || [];
+
+        if (src === 'outbound') {
+            // 載入到出庫
+            const info = payload.recordInfo || {};
+            switchPage('usePage');
+            document.getElementById('useOrderNo').value = info.orderNo || '';
+            const supEl = useEl('useSupplierSelect', 0);
+            if (supEl) supEl.value = info.supplier || '';
+            useUpdateGiftSelectN(0, info.gift || '');
+            // 填入完整代碼清單（優先）或首尾碼
+            const codesEl = useEl('useCodes', 0);
+            if (allCodes.length > 0 && codesEl) {
+                codesEl.value = allCodes.join('\n');
+                useSmartDetectDebouncedN(0);
+            } else {
+                const startEl = useEl('useStart', 0);
+                const endEl = useEl('useEnd', 0);
+                if (startEl) startEl.value = info.start || '';
+                if (endEl) endEl.value = info.end || '';
+                if (startEl && startEl.value) { useSmartDetectDebouncedN(0); useUpdateRangeCountN(0); }
             }
+            if (info.channel) {
+                const channelRadio = document.querySelector(`input[name="useChannel"][value="${info.channel}"]`);
+                if (channelRadio) channelRadio.checked = true;
+            }
+            if (info.reportMonth) {
+                const parts = info.reportMonth.split('-');
+                if (parts.length === 2) {
+                    document.getElementById('useReportYear').value = parts[0];
+                    document.getElementById('useReportMonth').value = parts[1];
+                }
+            }
+            showToast('已載入到出庫表單，請確認後提交');
+        } else if (src === 'inbound') {
+            // 載入到入庫
+            switchPage('registerPage');
+            const regCodesEl = document.getElementById('regCodes');
+            if (regCodesEl && allCodes.length > 0) {
+                regCodesEl.value = allCodes.join('\n');
+            } else if (payload.payload && payload.payload.length > 0) {
+                const firstItem = payload.payload[0];
+                document.getElementById('regStart').value = firstItem.Code || '';
+                const lastItem = payload.payload[payload.payload.length - 1];
+                document.getElementById('regEnd').value = lastItem.Code || '';
+            }
+            showToast('已載入到入庫表單，請確認後提交');
+        } else if (src === 'return' || src === 'exchange') {
+            // 載入到退回
+            switchPage('returnPage');
+            const returnCodesEl = document.getElementById('returnCodes');
+            const exchangeCodesEl = document.getElementById('exchangeCodes');
+            if (returnCodesEl && payload.returnCodes) {
+                returnCodesEl.value = payload.returnCodes.join('\n');
+            }
+            if (exchangeCodesEl && payload.exchangeCodes && payload.exchangeCodes.length > 0) {
+                exchangeCodesEl.value = payload.exchangeCodes.join('\n');
+            }
+            if (payload.reason) {
+                const reasonEl = document.getElementById('returnReasonSelect');
+                if (reasonEl) reasonEl.value = payload.reason;
+            }
+            showToast('已載入到退回表單，請確認後提交');
+        } else if (src === 'returnToSupplier') {
+            // 載入到退回商戶
+            switchPage('retSupPage');
+            const retSupCodesEl = document.getElementById('retSupCodes');
+            if (retSupCodesEl && (allCodes.length > 0 || payload.codes)) {
+                retSupCodesEl.value = (allCodes.length > 0 ? allCodes : payload.codes).join('\n');
+            }
+            if (payload.reason) {
+                const reasonEl = document.getElementById('retSupReasonSelect');
+                if (reasonEl) reasonEl.value = payload.reason;
+            }
+            showToast('已載入到退回商戶表單，請確認後提交');
         }
-        
+
         // 顯示問題項目提示橫幅
         currentProblemItem = { id: id, problem: problem };
         const banner = document.getElementById('problemItemBanner');
         const infoSpan = document.getElementById('problemItemInfo');
-        infoSpan.textContent = `訂單 ${problem.orderNo || ''} | ${problem.supplier || ''} - ${problem.gift || ''} | ${problem.count || ''}張`;
+        const srcLabel = {outbound:'出庫', inbound:'入庫', return:'退回', exchange:'退換', returnToSupplier:'退回商戶'}[src] || '出庫';
+        infoSpan.textContent = `[來源:${srcLabel}] 訂單 ${problem.orderNo || ''} | ${problem.supplier || ''} ${problem.gift || ''} | ${problem.count || ''}張`;
         banner.style.display = 'block';
-        
+
         // 從問題清單移除
         processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
         updateStatusDisplay();
-        showToast('已載入到出庫表單，請確認後提交');
     }
 
     let currentProblemItem = null;
@@ -2551,25 +2792,42 @@
         const problemList = document.getElementById('problemList');
         problemList.innerHTML = processingStatuses.problem.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         processingStatuses.problem.forEach(item => {
-            const codeInfo = formatCodeRange(item);
             const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
+            // 顯示完整代碼清單
+            let codeDisplay = '';
+            if (item.allCodes && item.allCodes.length > 0) {
+                codeDisplay = '代碼: ' + mergeConsecutiveCodes(item.allCodes);
+            } else {
+                codeDisplay = formatCodeRange(item);
+            }
+            // 根據來源類型顯示不同按鈕
+            const src = item.sourceType || 'outbound';
+            let loadBtnText = '載入到出庫';
+            if (src === 'inbound') loadBtnText = '載入到入庫';
+            else if (src === 'return') loadBtnText = '載入到退回';
+            else if (src === 'exchange') loadBtnText = '載入到退回(更換)';
+            else if (src === 'returnToSupplier') loadBtnText = '載入到退回商戶';
+            // 來源標籤
+            const srcLabel = {outbound:'出庫', inbound:'入庫', return:'退回', exchange:'退換', returnToSupplier:'退回商戶'}[src] || '出庫';
             problemList.innerHTML += `
                 <div class="status-item problem">
                     <div class="status-item-header">
+                        <span style="background:#ef4444; color:#fff; padding:1px 6px; border-radius:3px; font-size:10px; margin-right:4px;">${srcLabel}</span>
                         訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time">${item.duration}s</span>
                     </div>
                     <div class="status-item-content">
-                        ${item.supplier} - ${item.gift}<br/>
-                        數量: ${item.count} 張${codeInfo ? '<br/>' + codeInfo : ''}
+                        ${item.supplier ? item.supplier + ' - ' + item.gift + '<br/>' : ''}
+                        數量: ${item.count} 張<br/>
+                        ${codeDisplay}
                     </div>
                     <div class="status-item-problems">
                         <strong>問題:</strong> ${item.errorMsg}
                     </div>
-                    <div style="display:flex; gap:6px; margin-top:6px;">
-                        ${item.retryPayload ? `<button class="clear-btn" style="background:#2563eb; color:#fff; border:none;" onclick="loadProblemToForm('${item.id}')">\u8f09\u5165\u5230\u51fa\u5eab</button>` : ''}
-                        ${item.retryPayload ? `<button class="clear-btn" style="background:#6b7280; color:#fff; border:none;" onclick="retryTask('${item.id}')">\u76f4\u63a5\u91cd\u8a66</button>` : ''}
-                        <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">\u6e05\u9664</button>
+                    <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                        ${item.retryPayload ? `<button class="clear-btn" style="background:#2563eb; color:#fff; border:none;" onclick="loadProblemToForm('${item.id}')">${loadBtnText}</button>` : ''}
+                        ${item.retryPayload ? `<button class="clear-btn" style="background:#6b7280; color:#fff; border:none;" onclick="retryTask('${item.id}')">直接重試</button>` : ''}
+                        <button class="clear-btn" onclick="markProblemAsSolved('${item.id}')">清除</button>
                     </div>
                 </div>
             `;
@@ -2777,7 +3035,7 @@
             const codeEnd = codes[codes.length - 1] || '';
             const regId = generateProcessId();
             const regPayload = { mode: 'register', user: currentUser, reportMonth: regReportMonth, activated: regActivated, payload: codes.map(c => ({Batch: currentBatch, Supplier: s, GiftName: g, Code: c})) };
-            addProcessingStatus(regId, `入庫 ${s}/${g}`, codes.length, s, g, new Date(), codeStart, codeEnd, regPayload);
+            addProcessingStatus(regId, `入庫 ${s}/${g}`, codes.length, s, g, new Date(), codeStart, codeEnd, regPayload, 'inbound', codes);
             // 清空表單讓用戶繼續操作
             document.getElementById('regCodes').value = ""; document.getElementById('regStart').value = ""; document.getElementById('regEnd').value = ""; document.getElementById('regTotal').innerText = "總張數: 0";
             const defRptReg = getDefaultReportMonth(); if (defRptReg) { document.getElementById('regReportYear').value = defRptReg.year; document.getElementById('regReportMonth').value = defRptReg.month; }
@@ -2795,6 +3053,7 @@
                             document.getElementById('batchDisplay').innerText = currentBatch;
                         }
                         loadStats(false);
+                        autoRefreshCache(); // V3.7.5 入庫後自動更新快取
                     } else {
                         updateProcessingStatus(regId, 'problem', startTime, regData.message || '登記失敗');
                     }
@@ -3111,7 +3370,7 @@
             returnMode: mode,
             reason: reason
         };
-        addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1], returnPayload);
+        addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1], returnPayload, mode === 'exchange' ? 'exchange' : 'return', returnCodes.concat(exchangeCodes));
         // 清空表單讓用戶繼續操作
         document.getElementById('returnCodes').value = '';
         document.getElementById('exchangeCodes').value = '';
@@ -3125,24 +3384,56 @@
         document.getElementById('returnPreview').style.display = 'none';
         document.getElementById('returnConfirmBtn').style.display = 'none';
 
-        // 背景執行退回
-        fetchWithRetry(API_URL, {
-            method: 'POST',
-            body: JSON.stringify(returnPayload)
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.result === 'success') {
-                updateProcessingStatus(processId, 'completed', startTime);
-                showToast(`退回完成！已處理 ${data.returnedCount} 張`);
-                loadStats(false);
-            } else {
-                updateProcessingStatus(processId, 'problem', startTime, data.message || '退回失敗');
+        if (isOfflineMode) {
+            // 離線模式：存入本地佇列
+            addToOfflineQueue({
+                type: 'return',
+                payload: returnPayload,
+                description: `退回: ${returnCodes.length}張 (${mode === 'exchange' ? '更換' : '只退回'})${reason ? ' 原因:' + reason : ''}`,
+                returnCodes: returnCodes,
+                exchangeCodes: exchangeCodes,
+                returnMode: mode,
+                reason: reason,
+                user: currentUser
+            });
+            // 更新本地快取：退回的代碼標記為未使用
+            returnCodes.forEach(c => {
+                const canon = canonCodeLocal(c);
+                if (localUsedSet) localUsedSet.delete(canon);
+                if (localCodeIndex && !localCodeIndex[canon]) {
+                    localCodeIndex[canon] = { supplier: '', giftName: '', storedCode: c };
+                }
+            });
+            // 更換的新代碼標記為已使用
+            if (mode === 'exchange') {
+                exchangeCodes.forEach(c => {
+                    const canon = canonCodeLocal(c);
+                    if (localUsedSet) localUsedSet.add(canon);
+                    if (localCodeIndex) delete localCodeIndex[canon];
+                });
             }
-        })
-        .catch(err => {
-            updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
-        });
+            showToast(`離線模式: 已暫存退回記錄 (${returnCodes.length}張)`);
+        } else {
+            // 背景執行退回
+            fetchWithRetry(API_URL, {
+                method: 'POST',
+                body: JSON.stringify(returnPayload)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    updateProcessingStatus(processId, 'completed', startTime);
+                    showToast(`退回完成！已處理 ${data.returnedCount} 張`);
+                    loadStats(false);
+                    autoRefreshCache(); // V3.7.5 退回後自動更新快取
+                } else {
+                    updateProcessingStatus(processId, 'problem', startTime, data.message || '退回失敗');
+                }
+            })
+            .catch(err => {
+                updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
+            });
+        }
     }
 
     // ===== 退回商戶 (出庫) =====
@@ -3242,7 +3533,7 @@
         const processId = generateProcessId();
         const startTime = new Date();
         const retSupPayload = { mode: 'returnToSupplier', codes: lines, reason: reason, user: currentUser };
-        addProcessingStatus(processId, '退回商戶' + (reason ? '-' + reason : ''), lines.length, '', '', startTime, lines[0], lines[lines.length - 1], retSupPayload);
+        addProcessingStatus(processId, '退回商戶' + (reason ? '-' + reason : ''), lines.length, '', '', startTime, lines[0], lines[lines.length - 1], retSupPayload, 'returnToSupplier', lines);
 
         // 清空表單讓用戶繼續操作
         document.getElementById('retSupCodes').value = '';
@@ -3253,21 +3544,41 @@
         document.getElementById('retSupReasonOther').style.display = 'none';
         showToast('退回商戶任務已提交');
 
-        // 背景執行
-        fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(retSupPayload) })
-            .then(r => r.json())
-            .then(data => {
-                if (data.result === 'success') {
-                    updateProcessingStatus(processId, 'completed', startTime);
-                    showToast(`已成功退回商戶 ${data.count} 張`);
-                    loadStats(false);
-                } else {
-                    updateProcessingStatus(processId, 'problem', startTime, data.message || '退回失敗');
-                }
-            })
-            .catch(err => {
-                updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
+        if (isOfflineMode) {
+            // 離線模式：存入本地佇列
+            addToOfflineQueue({
+                type: 'returnToSupplier',
+                payload: retSupPayload,
+                description: `退回商戶: ${lines.length}張${reason ? ' 原因:' + reason : ''}`,
+                codes: lines,
+                reason: reason,
+                user: currentUser
             });
+            // 更新本地快取：退庫的代碼從未使用中移除
+            lines.forEach(c => {
+                const canon = canonCodeLocal(c);
+                if (localUsedSet) localUsedSet.delete(canon);
+                if (localCodeIndex) delete localCodeIndex[canon];
+            });
+            showToast(`離線模式: 已暫存退回商戶記錄 (${lines.length}張)`);
+        } else {
+            // 背景執行
+            fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(retSupPayload) })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.result === 'success') {
+                        updateProcessingStatus(processId, 'completed', startTime);
+                        showToast(`已成功退回商戶 ${data.count} 張`);
+                        loadStats(false);
+                        autoRefreshCache(); // V3.7.5 退庫後自動更新快取
+                    } else {
+                        updateProcessingStatus(processId, 'problem', startTime, data.message || '退回失敗');
+                    }
+                })
+                .catch(err => {
+                    updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
+                });
+        }
     }
 
     // ===== 電子禮券功能 =====
@@ -3916,6 +4227,208 @@
         }
     }
     // ===== END 訂單記錄管理 =====
+
+    // ===== 每日報告 =====
+    function initDailyReportPage() {
+        // 預設今天日期
+        const today = new Date();
+        const dateStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+        document.getElementById('drDate').value = dateStr;
+        // 填充供應商下拉
+        if (giftDatabase && giftDatabase.length > 0) {
+            const suppliers = [...new Set(giftDatabase.map(c => c.supplier))];
+            const sel = document.getElementById('drSupplier');
+            sel.innerHTML = '<option value="">全部</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        }
+        document.getElementById('drSupplier').addEventListener('change', function() {
+            const sup = this.value;
+            const giftSel = document.getElementById('drGift');
+            if (!sup) { giftSel.innerHTML = '<option value="">全部</option>'; return; }
+            if (giftDatabase) {
+                const items = giftDatabase.filter(c => c.supplier === sup);
+                giftSel.innerHTML = '<option value="">全部</option>' + items.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+            }
+        });
+    }
+
+    async function loadDailyReport() {
+        const date = document.getElementById('drDate').value;
+        const supplierFilter = document.getElementById('drSupplier').value;
+        const giftFilter = document.getElementById('drGift').value;
+        if (!date) { alert('請選擇日期'); return; }
+
+        const loading = document.getElementById('drLoading');
+        const content = document.getElementById('drContent');
+        loading.style.display = 'block';
+        content.innerHTML = '';
+
+        try {
+            const res = await fetchWithRetry(`${API_URL}?action=getDailyReport&date=${date}`);
+            const data = await res.json();
+            loading.style.display = 'none';
+
+            // 處理錯誤回應
+            if (data && data.result === 'error') {
+                content.innerHTML = `<p style="color:red;">查詢失敗: ${data.message}</p>`;
+                return;
+            }
+
+            // 確保 data 是陣列
+            const records = Array.isArray(data) ? data : [];
+
+            if (records.length === 0) {
+                content.innerHTML = '<p style="color:#666;">該日期沒有已使用的記錄</p>';
+                return;
+            }
+
+            // 篩選
+            let filtered = records;
+            if (supplierFilter) filtered = filtered.filter(r => r.supplier === supplierFilter);
+            if (giftFilter) filtered = filtered.filter(r => r.gift === giftFilter);
+
+            if (filtered.length === 0) {
+                content.innerHTML = '<p style="color:#666;">篩選後沒有符合的記錄</p>';
+                return;
+            }
+
+            // 按供應商+項目分組
+            const groups = {};
+            filtered.forEach(r => {
+                const key = r.supplier + '|' + r.gift;
+                if (!groups[key]) groups[key] = { supplier: r.supplier, gift: r.gift, items: [] };
+                groups[key].items.push(r);
+            });
+
+            let html = '';
+            let groupIdx = 0;
+            Object.values(groups).forEach(group => {
+                const gid = 'drGroup_' + groupIdx++;
+                html += `<div style="background:#fff; border-radius:10px; padding:16px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,0.06);">`;
+                html += `<h3 style="margin:0 0 12px 0; color:#333;">${group.supplier} - ${group.gift} <span style="font-size:13px; color:#666; font-weight:normal;">(${group.items.length} 筆)</span></h3>`;
+
+                // 明細表格 - 預設只顯示前 2 筆
+                html += `<table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:12px;">`;
+                html += `<thead><tr style="background:#f3f3f3;"><th style="padding:6px 8px; border:1px solid #e5e5e5;">代碼</th><th style="padding:6px 8px; border:1px solid #e5e5e5;">啟動狀態</th><th style="padding:6px 8px; border:1px solid #e5e5e5;">訂單號</th><th style="padding:6px 8px; border:1px solid #e5e5e5;">購買渠道</th><th style="padding:6px 8px; border:1px solid #e5e5e5;">使用者</th><th style="padding:6px 8px; border:1px solid #e5e5e5;">次數</th></tr></thead><tbody>`;
+                group.items.forEach((r, idx) => {
+                    const actColor = r.activation === '已啟動' ? '#34c759' : '#ff9500';
+                    const hideStyle = idx >= 2 ? ` class="${gid}_extra" style="display:none;"` : '';
+                    html += `<tr${hideStyle}><td style="padding:5px 8px; border:1px solid #e5e5e5;"><code>${r.code}</code></td><td style="padding:5px 8px; border:1px solid #e5e5e5; color:${actColor};">${r.activation}</td><td style="padding:5px 8px; border:1px solid #e5e5e5;">${r.orderNo}</td><td style="padding:5px 8px; border:1px solid #e5e5e5;">${r.channel}</td><td style="padding:5px 8px; border:1px solid #e5e5e5;">${r.user}</td><td style="padding:5px 8px; border:1px solid #e5e5e5;">第${r.round}次</td></tr>`;
+                });
+                html += `</tbody></table>`;
+                if (group.items.length > 2) {
+                    html += `<button id="${gid}_btn" onclick="drToggleGroup('${gid}')" style="background:none; border:1px solid #ccc; border-radius:6px; padding:4px 12px; font-size:12px; color:#0071e3; cursor:pointer; margin-bottom:12px;">展開全部 (${group.items.length - 2} 筆更多)</button>`;
+                }
+
+                // 總匯
+                const allCodes = group.items.map(r => r.code);
+                const notActivated = group.items.filter(r => r.activation !== '已啟動').map(r => r.code);
+
+                html += `<div style="background:#f8f9fa; padding:12px; border-radius:8px; font-size:13px;">`;
+                html += `<p style="margin:0 0 6px 0;"><strong>今日已使用: ${allCodes.length}</strong></p>`;
+                html += `<p style="margin:0 0 6px 0; color:#555;">代碼: ${drMergeConsecutive(allCodes)}</p>`;
+                if (notActivated.length > 0) {
+                    const naId = gid + '_na';
+                    html += `<p style="margin:8px 0 4px 0;"><strong style="color:#ff9500;">今日已使用但未啟用: ${notActivated.length}</strong> <button id="${naId}_btn" onclick="drBatchActivate('${naId}')" style="margin-left:10px; background:#ff9500; color:#fff; border:none; border-radius:6px; padding:4px 12px; font-size:12px; cursor:pointer;">啟用代碼</button><span id="${naId}_status" style="margin-left:8px; font-size:12px;"></span></p>`;
+                    html += `<p style="margin:0; color:#e67e00;">代碼: ${drMergeConsecutive(notActivated)}</p>`;
+                    html += `<script type="text/data" id="${naId}_codes">${JSON.stringify(notActivated)}<\/script>`;
+                }
+                html += `</div></div>`;
+            });
+
+            content.innerHTML = html;
+        } catch (e) {
+            loading.style.display = 'none';
+            content.innerHTML = `<p style="color:red;">載入失敗: ${e.message}</p>`;
+        }
+    }
+
+    // 合併連續代碼顯示，例如: 10001-10012(12), 10066-10075(10)
+    function drToggleGroup(gid) {
+        const extras = document.querySelectorAll('.' + gid + '_extra');
+        const btn = document.getElementById(gid + '_btn');
+        const isHidden = extras.length > 0 && extras[0].style.display === 'none';
+        extras.forEach(el => { el.style.display = isHidden ? '' : 'none'; });
+        btn.textContent = isHidden ? '收起' : `展開全部 (${extras.length} 筆更多)`;
+    }
+
+    function drMergeConsecutive(codes) {
+        if (!codes || codes.length === 0) return '';
+        // 解析代碼
+        const parsed = codes.map(c => {
+            const s = c.toString().trim();
+            const m = s.match(/^([A-Za-z]*)(.*)$/);
+            const prefix = m[1] || '';
+            const numStr = m[2] || '';
+            const numVal = /^\d+$/.test(numStr) ? parseInt(numStr, 10) : NaN;
+            return { prefix, numStr, numVal, original: s, padLen: numStr.length };
+        });
+        // 排序
+        parsed.sort((a, b) => {
+            if (a.prefix !== b.prefix) return a.prefix < b.prefix ? -1 : 1;
+            return a.numVal - b.numVal;
+        });
+        // 分組
+        const ranges = [];
+        let rangeStart = parsed[0];
+        let rangePrev = parsed[0];
+        let rangeCount = 1;
+        for (let i = 1; i < parsed.length; i++) {
+            const cur = parsed[i];
+            const samePrefix = cur.prefix === rangePrev.prefix;
+            const consecutive = !isNaN(cur.numVal) && !isNaN(rangePrev.numVal) && cur.numVal === rangePrev.numVal + 1;
+            if (samePrefix && consecutive) {
+                rangePrev = cur;
+                rangeCount++;
+            } else {
+                ranges.push({ start: rangeStart.original, end: rangePrev.original, count: rangeCount });
+                rangeStart = cur;
+                rangePrev = cur;
+                rangeCount = 1;
+            }
+        }
+        ranges.push({ start: rangeStart.original, end: rangePrev.original, count: rangeCount });
+        return ranges.map(r => r.start === r.end ? `${r.start}(1)` : `${r.start}-${r.end}(${r.count})`).join(', ');
+    }
+    async function drBatchActivate(naId) {
+        const codesEl = document.getElementById(naId + '_codes');
+        const btn = document.getElementById(naId + '_btn');
+        const status = document.getElementById(naId + '_status');
+        if (!codesEl) return;
+        const codes = JSON.parse(codesEl.textContent);
+        if (!codes || codes.length === 0) return;
+        if (!confirm(`確定要將 ${codes.length} 個代碼批量啟用嗎？`)) return;
+
+        btn.disabled = true;
+        btn.textContent = '啟用中...';
+        status.textContent = '';
+        status.style.color = '#666';
+
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'batchActivate', codes: codes })
+            });
+            const result = await res.json();
+            if (result.result === 'success') {
+                btn.textContent = '✓ 已啟用';
+                btn.style.background = '#34c759';
+                status.textContent = `成功啟用 ${result.count || codes.length} 個代碼`;
+                status.style.color = '#34c759';
+            } else {
+                btn.textContent = '啟用代碼';
+                btn.disabled = false;
+                status.textContent = `失敗: ${result.message || '未知錯誤'}`;
+                status.style.color = 'red';
+            }
+        } catch (e) {
+            btn.textContent = '啟用代碼';
+            btn.disabled = false;
+            status.textContent = `錯誤: ${e.message}`;
+            status.style.color = 'red';
+        }
+    }
+    // ===== END 每日報告 =====
 
 </script>
 </body>
