@@ -725,11 +725,13 @@
 
     // 出庫處理狀態管理
     let processingStatuses = {
-        processing: [],
+        waiting: [],    // 排隊中
+        processing: [], // 處理中
         completed: [],
         problem: [],
         solved: []
     };
+    const MAX_CONCURRENT_TASKS = 2;
 
     // ===== V3.7.5 離線緩衝模式 =====
     let isOfflineMode = false;
@@ -2423,58 +2425,6 @@
                 showToast(`離線模式: 已暫存出庫記錄 (${codes.length}張)`);
             } else {
                 addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1], usePayload, 'outbound', codes);
-
-                // 非同步提交（不阻擋下一個品項的提交）
-                (async () => {
-                    try {
-                        const res = await fetchWithRetry(API_URL, { 
-                            method: "POST", 
-                            body: JSON.stringify(usePayload) 
-                        });
-                        const data = await res.json();
-                        if (data.result === "success") {
-                            updateProcessingStatus(processId, 'completed', startTime);
-                            showToast("已完成記錄");
-                            loadStats(false);
-                            autoRefreshCache(); // V3.7.5 自動增量更新快取
-                            if (currentProblemItem) {
-                                const origP = currentProblemItem.problem;
-                                processingStatuses.processing.push(origP);
-                                updateProcessingStatus(origP.id, 'solved', origP.startTime, origP.errorMsg || '');
-                                currentProblemItem = null;
-                                document.getElementById('problemItemBanner').style.display = 'none';
-                                document.getElementById('problemItemInfo').textContent = '';
-                            }
-                        } else { 
-                            throw new Error(data.message); 
-                        }
-                    } catch (err) {
-                        // V3.7.6 假性 404/超時處理：延遲 3 秒後檢查 Records 是否已成功寫入
-                        console.warn("提交出庫發生連線異常，啟動二次確認機制...", err);
-                        setTimeout(async () => {
-                            try {
-                                const checkRes = await fetch(`${API_URL}?action=getRecords`);
-                                const records = await checkRes.json();
-                                // 檢查最近 50 筆記錄中是否有相符的訂單號與代碼範圍
-                                const found = records.slice(0, 50).find(r => 
-                                    String(r[7]) === String(orderNo) && 
-                                    (canonCodeLocal(String(r[3])) === canonCodeLocal(codes[0]) || 
-                                     canonCodeLocal(String(r[4])) === canonCodeLocal(codes[codes.length-1]))
-                                );
-                                if (found) {
-                                    updateProcessingStatus(processId, 'completed', startTime);
-                                    showToast("連線異常但背景處理成功！已自動標記為完成。");
-                                    loadStats(false);
-                                    autoRefreshCache();
-                                } else {
-                                    updateProcessingStatus(processId, 'problem', startTime, "連線異常 (HTTP 404/Timeout) 且未能在 Records 中找到寫入紀錄。請確認後重試。");
-                                }
-                            } catch (e) {
-                                updateProcessingStatus(processId, 'problem', startTime, "連線中斷且無法進行二次確認: " + err.message);
-                            }
-                        }, 3000);
-                    }
-                })();
             }
         }
     }
@@ -2568,17 +2518,20 @@
                 };
                 if (t.status === '有問題' || t.status === 'problem') {
                     processingStatuses.problem.push(statusItem);
-                } else if (t.status === '處理中' || t.status === 'processing') {
-                    // 如果後端仍顯示處理中但已經過了很久，可能是異常終止，標記為問題
-                    const elapsed = (new Date() - new Date(t.startTime)) / 1000;
-                    if (elapsed > 300) { // 超過 5 分鐘仍在處理中，視為異常
-                        statusItem.status = 'problem';
-                        statusItem.errorMsg = statusItem.errorMsg || '處理逾時（可能已異常終止）';
-                        processingStatuses.problem.push(statusItem);
-                    } else {
-                        processingStatuses.processing.push(statusItem);
-                    }
-                } else if (t.status === '已完成' || t.status === 'completed') {
+            } else if (t.status === '排隊中' || t.status === 'waiting') {
+                statusItem.status = 'waiting';
+                processingStatuses.waiting.push(statusItem);
+            } else if (t.status === '處理中' || t.status === 'processing') {
+                // 如果後端仍顯示處理中但已經過了很久，可能是異常終止，標記為問題
+                const elapsed = (new Date() - new Date(t.startTime)) / 1000;
+                if (elapsed > 300) { // 超過 5 分鐘仍在處理中，視為異常
+                    statusItem.status = 'problem';
+                    statusItem.errorMsg = statusItem.errorMsg || '處理逾時（可能已異常終止）';
+                    processingStatuses.problem.push(statusItem);
+                } else {
+                    processingStatuses.processing.push(statusItem);
+                }
+            } else if (t.status === '已完成' || t.status === 'completed') {
                     if (processingStatuses.completed.length < 3) {
                         processingStatuses.completed.push(statusItem);
                     }
@@ -2592,32 +2545,32 @@
         } catch (e) { /* 載入失敗不影響主流程 */ }
     }
 
-    const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
+    const TASK_STATUS_TEXT = { waiting: '排隊中', processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
     function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes) {
-        // 確保訂單號是字串，防止 Date 物件誤入
         const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
-        
         const finalSourceType = sourceType || 'outbound';
         const finalAllCodes = allCodes || [];
 
-        processingStatuses.processing.push({
+        const task = {
             id: id,
             orderNo: finalOrderNo,
             count: count,
             supplier: supplier,
             gift: gift,
-            startTime: startTime,
-            status: 'processing',
+            startTime: null, 
+            status: 'waiting',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
             user: currentUser || '',
             retryPayload: retryPayload || null,
             sourceType: finalSourceType,
             allCodes: finalAllCodes
-        });
+        };
+
+        processingStatuses.waiting.push(task);
         updateStatusDisplay();
-        // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
+        
         logTaskToSheet({
             taskId: id,
             taskType: supplier === '啟用作業' ? '啟用' : (finalOrderNo.startsWith('入庫') ? '入庫' : '出庫'),
@@ -2625,8 +2578,8 @@
             detail: supplier + ' - ' + gift,
             count: count,
             user: currentUser,
-            startTime: startTime,
-            status: '處理中',
+            startTime: new Date(),
+            status: '排隊中',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
             channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : '',
@@ -2634,6 +2587,66 @@
             sourceType: finalSourceType,
             allCodes: finalAllCodes
         });
+
+        processQueue();
+    }
+
+    async function processQueue() {
+        if (processingStatuses.processing.length >= MAX_CONCURRENT_TASKS) return;
+        if (processingStatuses.waiting.length === 0) return;
+
+        const task = processingStatuses.waiting.shift();
+        task.status = 'processing';
+        task.startTime = new Date();
+        processingStatuses.processing.push(task);
+        updateStatusDisplay();
+
+        logTaskToSheet({ taskId: task.id, status: '處理中', startTime: task.startTime });
+
+        try {
+            const res = await fetchWithRetry(API_URL, { 
+                method: "POST", 
+                body: JSON.stringify(task.retryPayload) 
+            });
+            const data = await res.json();
+            if (data.result === "success") {
+                updateProcessingStatus(task.id, 'completed', task.startTime);
+                showToast("已完成記錄: " + task.orderNo);
+                loadStats(false);
+                autoRefreshCache();
+                if (currentProblemItem && currentProblemItem.problem.id === task.id) {
+                    currentProblemItem = null;
+                    document.getElementById('problemItemBanner').style.display = 'none';
+                }
+            } else { 
+                throw new Error(data.message); 
+            }
+        } catch (err) {
+            console.warn("提交發生連線異常，啟動二次確認機制...", err);
+            setTimeout(async () => {
+                try {
+                    const checkRes = await fetch(`${API_URL}?action=getRecords`);
+                    const records = await checkRes.json();
+                    const found = records.slice(0, 50).find(r => 
+                        String(r[7]) === String(task.orderNo) && 
+                        (canonCodeLocal(String(r[3])) === canonCodeLocal(task.allCodes[0]) || 
+                         canonCodeLocal(String(r[4])) === canonCodeLocal(task.allCodes[task.allCodes.length-1]))
+                    );
+                    if (found) {
+                        updateProcessingStatus(task.id, 'completed', task.startTime);
+                        showToast("連線異常但背景處理成功！已自動標記為完成。");
+                        loadStats(false);
+                        autoRefreshCache();
+                    } else {
+                        updateProcessingStatus(task.id, 'problem', task.startTime, "連線異常 (HTTP 404/Timeout) 且未能在 Records 中找到寫入紀錄。");
+                    }
+                } catch (e) {
+                    updateProcessingStatus(task.id, 'problem', task.startTime, "連線中斷且無法進行二次確認: " + err.message);
+                }
+            }, 3000);
+        } finally {
+            processQueue(); 
+        }
     }
 
     function updateProcessingStatus(id, newStatus, startTime, errorMsg = '') {
@@ -2898,7 +2911,9 @@
     function updateStatusDisplay() {
         // 更新處理中
         const processingList = document.getElementById('processingList');
-        processingList.innerHTML = processingStatuses.processing.length === 0 ? '<p style="color:#999; font-size:12px;">無</p>' : '';
+        processingList.innerHTML = (processingStatuses.processing.length === 0 && processingStatuses.waiting.length === 0) ? '<p style="color:#999; font-size:12px;">無</p>' : '';
+        
+        // 顯示正在處理
         processingStatuses.processing.forEach(item => {
             const elapsed = ((new Date() - item.startTime) / 1000).toFixed(1);
             const codeInfo = formatCodeRange(item);
@@ -2916,7 +2931,25 @@
                 </div>
             `;
         });
-        document.getElementById('processingCount').innerText = processingStatuses.processing.length;
+
+        // 顯示排隊中
+        processingStatuses.waiting.forEach(item => {
+            const codeInfo = formatCodeRange(item);
+            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
+            processingList.innerHTML += `
+                <div class="status-item waiting" style="border-left: 4px solid #adb5bd; background: #f8f9fa;">
+                    <div class="status-item-header">
+                        訂單: ${item.orderNo}${userTag}
+                        <span class="status-item-time" style="background:#adb5bd;">排隊中</span>
+                    </div>
+                    <div class="status-item-content">
+                        ${item.supplier} - ${item.gift}<br/>
+                        數量: ${item.count} 張${codeInfo ? '<br/>' + codeInfo : ''}
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('processingCount').innerText = processingStatuses.processing.length + processingStatuses.waiting.length;
 
         // 更新已完成
         const completedList = document.getElementById('completedList');
