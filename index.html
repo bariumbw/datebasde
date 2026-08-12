@@ -132,7 +132,10 @@
                     <div class="form-group"><label>日期(終)</label><input type="date" id="statEnd" onchange="loadStats()"></div>
                     <div class="form-group"><label>供應商</label><select id="statSupplier" onchange="updateStatGiftMenu(); loadStats()"><option value="">全部</option></select></div>
                     <div class="form-group"><label>項目</label><select id="statGift" onchange="loadStats()"><option value="">全部</option></select></div>
-                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="loadStats()" style="width:100%;">重新整理</button></div>
+                    <div class="form-group" style="display:flex; align-items:flex-end; gap:5px;">
+                        <button onclick="loadStats()" style="flex:1;">重新整理</button>
+                        <button onclick="triggerFixUsageCache()" style="flex:1; background:#666; font-size:11px;">修正快取狀態</button>
+                    </div>
                 </div>
                 <div class="stats-table">
                     <table>
@@ -4305,6 +4308,26 @@
             hideLoading();
         }
     }
+
+    async function triggerFixUsageCache() {
+        if (!confirm('確定要修正使用狀態快取？\n系統將會同步後端 F 欄(使用狀態)與 U 欄(快取標記)，解決「已退回代碼仍顯示已使用」的問題。')) return;
+        showLoading();
+        try {
+            const res = await fetchWithRetry(`${API_URL}?action=fixUsageCache`);
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast(`修正完成，共處理 ${data.fixed} 筆資料`);
+                // 強制全量更新本地快取
+                loadCodeIndex();
+            } else {
+                alert('修正失敗: ' + (data.message || ''));
+            }
+        } catch (e) {
+            alert('修正失敗: ' + e.message);
+        } finally {
+            hideLoading();
+        }
+    }
     // ===== END 訂單記錄管理 =====
 
     // ===== 每日報告 =====
@@ -4858,5 +4881,25 @@
             .catch(e => {
                 updateProcessingStatus(processId, 'problem', startTime, e.message);
             });
+    }
+
+    async function triggerFixUsageCache() {
+        if (!confirm('確定要修正使用狀態快取？\n系統將會同步後端 F 欄(使用狀態)與 U 欄(快取標記)，解決「已退回代碼仍顯示已使用」的問題。')) return;
+        showLoading();
+        try {
+            const res = await fetchWithRetry(`${API_URL}?action=fixUsageCache`);
+            const data = await res.json();
+            if (data.result === 'success') {
+                showToast(`修正完成，共處理 ${data.fixed} 筆資料`);
+                // 強制全量更新本地快取
+                loadCodeIndex();
+            } else {
+                alert('修正失敗: ' + (data.message || ''));
+            }
+        } catch (e) {
+            alert('修正失敗: ' + e.message);
+        } finally {
+            hideLoading();
+        }
     }
 </script></body></html>
