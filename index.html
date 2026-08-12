@@ -3456,7 +3456,9 @@
             returnMode: mode,
             reason: reason
         };
-        addProcessingStatus(processId, '退回' + (reason ? '-' + reason : ''), returnCodes.length, '', '', startTime, returnCodes[0], returnCodes[returnCodes.length - 1], returnPayload, mode === 'exchange' ? 'exchange' : 'return', returnCodes.concat(exchangeCodes));
+        // 取得第一個退回代碼作為識別
+        const firstCode = returnCodes[0] || '';
+        addProcessingStatus(processId, '退回: ' + firstCode + (reason ? ' (' + reason + ')' : ''), returnCodes.length, '退回作業', mode === 'exchange' ? '更換' : '只退回', startTime, returnCodes[0], returnCodes[returnCodes.length - 1], returnPayload, mode === 'exchange' ? 'exchange' : 'return', returnCodes.concat(exchangeCodes));
         // 清空表單讓用戶繼續操作
         document.getElementById('returnCodes').value = '';
         document.getElementById('exchangeCodes').value = '';
