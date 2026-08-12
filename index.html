@@ -1711,6 +1711,7 @@
         itemLastDetectedCodes.push(null);
         itemLastDetectInfos.push(null);
         itemCurrentUseCodes.push(null);
+        itemCurrentOriginalCodes.push(null);
         itemCurrentUseMatches.push(null);
 
         const suppliers = [...new Set(giftDatabase.filter(i => !i.isEGift).map(i => i.supplier))];
@@ -2186,19 +2187,33 @@
         const gift = (useEl('useGiftSelect', n) || {}).value || '';
         const previewBox = useEl('previewBox', n);
         
-        if (!supplier || !gift) { if (previewBox) previewBox.style.display = 'none'; itemCurrentUseCodes[n] = null; itemCurrentUseMatches[n] = null; updateUseItemsSummary(); return; }
+        if (!supplier || !gift) { 
+            if (previewBox) previewBox.style.display = 'none'; 
+            itemCurrentUseCodes[n] = null; 
+            itemCurrentOriginalCodes[n] = null;
+            itemCurrentUseMatches[n] = null; 
+            updateUseItemsSummary(); 
+            return; 
+        }
         
         const match = giftDatabase.find(g => g.name === gift && g.supplier === supplier);
         if (!match) { if (previewBox) previewBox.style.display = 'none'; return; }
         const hasTransform = !!getCalcTransform(match.calcType);
 
         let codes = [];
+        let originalCodes = [];
         if (mode === 'range') {
             const start = (useEl('useStart', n) || {}).value || '';
             const end = (useEl('useEnd', n) || {}).value || '';
             if (!start.trim() || !end.trim()) { if (previewBox) previewBox.style.display = 'none'; return; }
-            let sStripped = hasTransform ? stripSingleCode(start.trim(), match.calcType) : start.trim();
-            let eStripped = hasTransform ? stripSingleCode(end.trim(), match.calcType) : end.trim();
+            
+            // 原始代碼
+            const startRaw = start.trim();
+            const endRaw = end.trim();
+            originalCodes = getRangeCodes(startRaw, endRaw);
+
+            let sStripped = hasTransform ? stripSingleCode(startRaw, match.calcType) : startRaw;
+            let eStripped = hasTransform ? stripSingleCode(endRaw, match.calcType) : endRaw;
             const sNumPart = parseInt((sStripped.match(/\d+$/) || ['0'])[0], 10);
             const eNumPart = parseInt((eStripped.match(/\d+$/) || ['0'])[0], 10);
             if (sNumPart > eNumPart) { const tmp = sStripped; sStripped = eStripped; eStripped = tmp; }
@@ -2207,8 +2222,9 @@
             codes = getRangeCodes(sStripped, eStripped);
         } else {
             const codesEl = useEl('useCodes', n);
-            codes = codesEl ? codesEl.value.trim().split('\n').map(c => c.trim()).filter(c => c !== "") : [];
-            if (hasTransform) codes = stripCodesByCalcType(codes, match.calcType);
+            originalCodes = codesEl ? codesEl.value.trim().split('\n').map(c => c.trim()).filter(c => c !== "") : [];
+            if (hasTransform) codes = stripCodesByCalcType(originalCodes, match.calcType);
+            else codes = originalCodes;
         }
         
         if (codes.length === 0) { if (previewBox) previewBox.style.display = 'none'; return; }
@@ -2216,13 +2232,15 @@
         // 更新預覽資訊
         const pSup = useEl('pSup', n); if (pSup) pSup.innerText = match.supplier;
         const pGift = useEl('pGift', n); if (pGift) pGift.innerText = match.name;
-        const pStart = useEl('pStart', n); if (pStart) pStart.innerText = codes[0] || "";
-        const pEnd = useEl('pEnd', n); if (pEnd) pEnd.innerText = codes[codes.length - 1] || "";
+        // 預覽優先顯示原始代碼，但備註入庫代碼
+        const pStart = useEl('pStart', n); if (pStart) pStart.innerText = originalCodes[0] || codes[0] || "";
+        const pEnd = useEl('pEnd', n); if (pEnd) pEnd.innerText = originalCodes[originalCodes.length - 1] || codes[codes.length - 1] || "";
         const pExpiry = useEl('pExpiry', n); if (pExpiry) pExpiry.innerText = calculateExpiryDate(match.rule1);
         const pCount = useEl('pCount', n); if (pCount) pCount.innerText = codes.length;
         if (previewBox) previewBox.style.display = 'block';
         itemCurrentUseMatches[n] = match;
         itemCurrentUseCodes[n] = codes;
+        itemCurrentOriginalCodes[n] = originalCodes;
         // 向後相容（品項 0 同步到 window 變數）
         if (n === 0) { window.currentUseMatch = match; window.currentUseCodes = codes; }
         updateUseItemsSummary();
@@ -2380,7 +2398,8 @@
 
         // 逐品項提交（各自獨立的 Task Center 條目）
         for (const item of itemsToSubmit) {
-            const { codes, match } = item;
+            const { codes, match, n } = item;
+            const originalCodes = itemCurrentOriginalCodes[n] || codes;
             const expiry = calculateExpiryDate(match.rule1);
             const processId = generateProcessId();
             const startTime = new Date();
@@ -2425,7 +2444,7 @@
                 });
                 showToast(`離線模式: 已暫存出庫記錄 (${codes.length}張)`);
             } else {
-                addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, codes[0], codes[codes.length - 1], usePayload, 'outbound', codes);
+                addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, originalCodes[0], originalCodes[originalCodes.length - 1], usePayload, 'outbound', codes, originalCodes);
             }
         }
     }
@@ -2480,11 +2499,14 @@
             processingStatuses.solved = [];
             // 保留當前 session 正在處理中的任務（不覆蓋）
             tasks.forEach(t => {
-                const tSupplier = (t.detail || '').split(' - ')[0] || t.supplier || '';
-                const tGift = (t.detail || '').split(' - ')[1] || t.gift || '';
-                const tOrderNo = t.description || t.orderNo || '';
+                const detailParts = (t.detail || '').split(' - ');
+                const tSupplier = detailParts[0] || t.supplier || '未知供應商';
+                const tGift = detailParts[1] || t.gift || '未知項目';
+                const tOrderNo = t.description || t.orderNo || '無訂單號';
                 const tStart = t.codeStart || '';
                 const tEnd = t.codeEnd || '';
+                const tOrigStart = t.originalCodeStart || '';
+                const tOrigEnd = t.originalCodeEnd || '';
                 const tChannel = t.channel || '';
                 const tReportMonth = t.reportMonth || '';
                 // 建構最小 retryPayload 讓「載入到出庫」能運作
@@ -2512,6 +2534,8 @@
                     status: t.status,
                     codeStart: tStart,
                     codeEnd: tEnd,
+                    originalCodeStart: tOrigStart,
+                    originalCodeEnd: tOrigEnd,
                     user: t.user || '',
                     retryPayload: reconstructedPayload,
                     sourceType: t.sourceType || 'outbound',
@@ -2548,7 +2572,7 @@
 
     const TASK_STATUS_TEXT = { waiting: '排隊中', processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
-    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes) {
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes, originalCodes) {
         const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
         const finalSourceType = sourceType || 'outbound';
         const finalAllCodes = allCodes || [];
@@ -2563,10 +2587,13 @@
             status: 'waiting',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
+            originalCodeStart: (originalCodes && originalCodes.length > 0) ? originalCodes[0] : (codeStart || ''),
+            originalCodeEnd: (originalCodes && originalCodes.length > 0) ? originalCodes[originalCodes.length - 1] : (codeEnd || ''),
             user: currentUser || '',
             retryPayload: retryPayload || null,
             sourceType: finalSourceType,
-            allCodes: finalAllCodes
+            allCodes: finalAllCodes,
+            originalCodes: originalCodes || []
         };
 
         processingStatuses.waiting.push(task);
@@ -2602,7 +2629,24 @@
         processingStatuses.processing.push(task);
         updateStatusDisplay();
 
-        logTaskToSheet({ taskId: task.id, status: '處理中', startTime: task.startTime });
+        logTaskToSheet({ 
+            taskId: task.id, 
+            status: '處理中', 
+            startTime: task.startTime,
+            taskType: task.supplier === '啟用作業' ? '啟用' : (task.orderNo.startsWith('入庫') ? '入庫' : '出庫'),
+            description: task.orderNo,
+            detail: task.supplier + ' - ' + task.gift,
+            count: task.count,
+            user: task.user,
+            codeStart: task.codeStart,
+            codeEnd: task.codeEnd,
+            originalCodeStart: task.originalCodeStart,
+            originalCodeEnd: task.originalCodeEnd,
+            channel: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.channel || '' : (task.retryPayload ? task.retryPayload.channel || '' : ''),
+            reportMonth: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.reportMonth || '' : (task.retryPayload ? task.reportMonth || '' : ''),
+            sourceType: task.sourceType,
+            allCodes: task.allCodes
+        });
 
         try {
             const res = await fetchWithRetry(API_URL, { 
@@ -2698,7 +2742,22 @@
             status: TASK_STATUS_TEXT[newStatus] || newStatus,
             finishTime: new Date(),
             elapsedSec: duration,
-            errorMsg: errorMsg || ''
+            errorMsg: errorMsg || '',
+            // 補全元數據以防創建了空行
+            taskType: item.supplier === '啟用作業' ? '啟用' : (item.orderNo.startsWith('入庫') ? '入庫' : '出庫'),
+            description: item.orderNo,
+            detail: item.supplier + ' - ' + item.gift,
+            count: item.count,
+            user: item.user,
+            startTime: item.startTime,
+            codeStart: item.codeStart,
+            codeEnd: item.codeEnd,
+            originalCodeStart: item.originalCodeStart,
+            originalCodeEnd: item.originalCodeEnd,
+            channel: (item.retryPayload && item.retryPayload.recordInfo) ? item.retryPayload.recordInfo.channel || '' : (item.retryPayload ? item.retryPayload.channel || '' : ''),
+            reportMonth: (item.retryPayload && item.retryPayload.recordInfo) ? item.retryPayload.recordInfo.reportMonth || '' : (item.retryPayload ? item.reportMonth || '' : ''),
+            sourceType: item.sourceType,
+            allCodes: item.allCodes
         });
     }
 
@@ -2901,10 +2960,12 @@
     }
 
     function formatCodeRange(item) {
-        if (item.codeStart && item.codeEnd && item.codeStart !== item.codeEnd) {
-            return `代碼: ${item.codeStart} ~ ${item.codeEnd}`;
-        } else if (item.codeStart) {
-            return `代碼: ${item.codeStart}`;
+        const start = item.originalCodeStart || item.codeStart;
+        const end = item.originalCodeEnd || item.codeEnd;
+        if (start && end && start !== end) {
+            return `代碼: ${start} ~ ${end}`;
+        } else if (start) {
+            return `代碼: ${start}`;
         }
         return '';
     }
@@ -2980,7 +3041,9 @@
             const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
             // 顯示完整代碼清單
             let codeDisplay = '';
-            if (item.allCodes && item.allCodes.length > 0) {
+            if (item.originalCodes && item.originalCodes.length > 0) {
+                codeDisplay = '代碼: ' + mergeConsecutiveCodes(item.originalCodes);
+            } else if (item.allCodes && item.allCodes.length > 0) {
                 codeDisplay = '代碼: ' + mergeConsecutiveCodes(item.allCodes);
             } else {
                 codeDisplay = formatCodeRange(item);
@@ -3060,9 +3123,12 @@
                     startTime: item.startTime,
                     duration: duration,
                     errorMsg: '處理逾時（超過 5 分鐘未回應，可能已失敗）',
-                    status: 'problem',
-                    codeStart: item.codeStart || '',
-                    codeEnd: item.codeEnd || '',
+	                    status: 'problem',
+	                    codeStart: item.codeStart || '',
+	                    codeEnd: item.codeEnd || '',
+	                    originalCodeStart: item.originalCodeStart || '',
+	                    originalCodeEnd: item.originalCodeEnd || '',
+	                    originalCodes: item.originalCodes || [],
                     retryPayload: item.retryPayload || null
                 });
             });
