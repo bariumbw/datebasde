@@ -2448,8 +2448,31 @@
                         } else { 
                             throw new Error(data.message); 
                         }
-                    } catch (err) { 
-                        updateProcessingStatus(processId, 'problem', startTime, err.message);
+                    } catch (err) {
+                        // V3.7.6 假性 404/超時處理：延遲 3 秒後檢查 Records 是否已成功寫入
+                        console.warn("提交出庫發生連線異常，啟動二次確認機制...", err);
+                        setTimeout(async () => {
+                            try {
+                                const checkRes = await fetch(`${API_URL}?action=getRecords`);
+                                const records = await checkRes.json();
+                                // 檢查最近 50 筆記錄中是否有相符的訂單號與代碼範圍
+                                const found = records.slice(0, 50).find(r => 
+                                    String(r[7]) === String(orderNo) && 
+                                    (canonCodeLocal(String(r[3])) === canonCodeLocal(codes[0]) || 
+                                     canonCodeLocal(String(r[4])) === canonCodeLocal(codes[codes.length-1]))
+                                );
+                                if (found) {
+                                    updateProcessingStatus(processId, 'completed', startTime);
+                                    showToast("連線異常但背景處理成功！已自動標記為完成。");
+                                    loadStats(false);
+                                    autoRefreshCache();
+                                } else {
+                                    updateProcessingStatus(processId, 'problem', startTime, "連線異常 (HTTP 404/Timeout) 且未能在 Records 中找到寫入紀錄。請確認後重試。");
+                                }
+                            } catch (e) {
+                                updateProcessingStatus(processId, 'problem', startTime, "連線中斷且無法進行二次確認: " + err.message);
+                            }
+                        }, 3000);
                     }
                 })();
             }
