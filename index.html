@@ -100,10 +100,17 @@
 <div class="main-wrapper">
     <div class="container">
         <div id="loginPage" class="page active">
-            <h2>禮券全能管理系統 V3.5.5</h2>
+            <h2>禮券全能管理系統 V3.7.6</h2>
             <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
             <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
-            <button onclick="handleLogin()" style="width:100%;">登入系統</button>
+            <button onclick="handleLogin()" style="width:100%; margin-bottom: 15px;">登入系統</button>
+            
+            <div style="margin-top:20px; padding:15px; border:1px solid #eee; border-radius:10px; background:#fafafa;">
+                <p style="font-size:13px; font-weight:600; color:#666; margin-bottom:8px;">🛠️ 連線診斷工具</p>
+                <p style="font-size:11px; color:#888; margin-bottom:10px;">如果出現 HTTP 404/403 錯誤，請使用此工具檢查連線狀態。</p>
+                <button onclick="testConnection()" style="background:#666; font-size:12px; padding:6px 12px;">測試後端連線</button>
+                <div id="diagResult" style="margin-top:10px; font-size:12px; display:none; padding:10px; border-radius:5px;"></div>
+            </div>
         </div>
 
         <div id="appPage" class="page">
@@ -923,6 +930,34 @@
     function showLoading() { document.getElementById('loadingOverlay').style.display = 'flex'; }
     function hideLoading() { document.getElementById('loadingOverlay').style.display = 'none'; }
 
+    async function testConnection() {
+        const resDiv = document.getElementById('diagResult');
+        resDiv.style.display = 'block';
+        resDiv.style.background = '#eee';
+        resDiv.style.color = '#333';
+        resDiv.textContent = '正在測試連線...';
+        
+        try {
+            const start = Date.now();
+            const res = await fetch(`${API_URL}?action=getBatch`, { method: 'GET', mode: 'cors' });
+            const duration = Date.now() - start;
+            
+            if (res.ok) {
+                resDiv.style.background = '#d4edda';
+                resDiv.style.color = '#155724';
+                resDiv.innerHTML = `<strong>✅ 連線成功！</strong><br>耗時: ${duration}ms<br>狀態: ${res.status} ${res.statusText}<br>後端網址正確且運作中。`;
+            } else {
+                resDiv.style.background = '#f8d7da';
+                resDiv.style.color = '#721c24';
+                resDiv.innerHTML = `<strong>❌ 連線失敗 (HTTP ${res.status})</strong><br>原因: ${res.statusText}<br><br><strong>可能原因：</strong><br>1. GAS 網址已失效，請重新部署。<br>2. 部署權限未設為「任何人 (Anyone)」。<br>3. HTML 內的 API_URL 填寫錯誤。`;
+            }
+        } catch (e) {
+            resDiv.style.background = '#f8d7da';
+            resDiv.style.color = '#721c24';
+            resDiv.innerHTML = `<strong>❌ 連線異常</strong><br>錯誤: ${e.message}<br><br>這通常代表瀏覽器被拒絕存取 GAS 網址。請確認 GAS 部署權限已設為「任何人 (Anyone)」。`;
+        }
+    }
+
     async function handleLogin() {
         showLoading();
         const email = document.getElementById('loginEmail').value;
@@ -944,7 +979,7 @@
                 loadTaskMonitor();
                 loadCodeIndex();
             } else { alert('驗證失敗'); hideLoading(); }
-        } catch (e) { alert('系統錯誤，請檢查 API 網址是否正確'); hideLoading(); }
+        } catch (e) { alert('連線失敗: ' + e.message + '\n請使用下方的「連線診斷工具」檢查原因。'); hideLoading(); }
     }
 
     function applyRolePermissions() {
@@ -2504,7 +2539,9 @@
                     codeStart: tStart,
                     codeEnd: tEnd,
                     user: t.user || '',
-                    retryPayload: reconstructedPayload
+                    retryPayload: reconstructedPayload,
+                    sourceType: t.sourceType || 'outbound',
+                    allCodes: t.allCodes || []
                 };
                 if (t.status === '有問題' || t.status === 'problem') {
                     processingStatuses.problem.push(statusItem);
@@ -2538,6 +2575,9 @@
         // 確保訂單號是字串，防止 Date 物件誤入
         const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
         
+        const finalSourceType = sourceType || 'outbound';
+        const finalAllCodes = allCodes || [];
+
         processingStatuses.processing.push({
             id: id,
             orderNo: finalOrderNo,
@@ -2550,8 +2590,8 @@
             codeEnd: codeEnd || '',
             user: currentUser || '',
             retryPayload: retryPayload || null,
-            sourceType: sourceType || 'outbound',
-            allCodes: allCodes || []
+            sourceType: finalSourceType,
+            allCodes: finalAllCodes
         });
         updateStatusDisplay();
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
@@ -2567,7 +2607,9 @@
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
             channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : '',
-            reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : ''
+            reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : '',
+            sourceType: finalSourceType,
+            allCodes: finalAllCodes
         });
     }
 
@@ -2802,7 +2844,7 @@
         processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
         const newId = generateProcessId();
         const startTime = new Date();
-        addProcessingStatus(newId, problem.orderNo, problem.count, problem.supplier, problem.gift, startTime, problem.codeStart, problem.codeEnd, problem.retryPayload);
+        addProcessingStatus(newId, problem.orderNo, problem.count, problem.supplier, problem.gift, startTime, problem.codeStart, problem.codeEnd, problem.retryPayload, problem.sourceType, problem.allCodes);
 
         // 重新發送請求
         fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(problem.retryPayload) })
