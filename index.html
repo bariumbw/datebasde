@@ -722,6 +722,7 @@
     let currentRole = 'Staff'; // 預設 Staff，登入後從後端取得
     let recordsCache = [], currentTypeFilter = "";
     let batchRptMode = false;
+    let eGiftPendingList = []; // 儲存電子禮券待處理清單，用於任務監控顯示
 
     // 出庫處理狀態管理
     let processingStatuses = {
@@ -2582,8 +2583,8 @@
             status: '排隊中',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
-            channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : '',
-            reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : '',
+            channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : (retryPayload ? retryPayload.channel || '' : ''),
+            reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : (retryPayload ? retryPayload.reportMonth || '' : ''),
             sourceType: finalSourceType,
             allCodes: finalAllCodes
         });
@@ -3829,6 +3830,7 @@
         try {
             const res = await fetchWithRetry(`${API_URL}?action=getEGiftPending`);
             const list = await res.json();
+            eGiftPendingList = list || []; // 儲存到全域變數
             if (!list || list.length === 0) {
                 container.innerHTML = '<div style="text-align:center; padding:30px; color:#999; font-size:14px; border:1px dashed #ddd; border-radius:8px; margin-top:10px;">沒有未完成的電子禮券</div>';
                 return;
@@ -4032,7 +4034,19 @@
         if (field === 'sent' && checked) {
             const processId = generateProcessId();
             const startTime = new Date();
-            addProcessingStatus(processId, `電子禮券發出 (row ${row})`, 1, '電子禮券', '', startTime, '', '', payload);
+            
+            // 尋找對應的電子禮券資料以顯示完整資訊
+            const eGift = eGiftPendingList.find(item => item.row === row) || {};
+            const codes = eGift.codes ? eGift.codes.split('\n').map(c => c.trim()).filter(c => c) : [];
+            const supplier = eGift.supplier || '電子禮券';
+            const giftName = eGift.gift || '';
+            const qty = eGift.qty || codes.length || 1;
+            const orderNo = eGift.orderNo || `row ${row}`;
+            const codeStart = codes[0] || '';
+            const codeEnd = codes[codes.length - 1] || '';
+
+            addProcessingStatus(processId, orderNo, qty, supplier, giftName, startTime, codeStart, codeEnd, payload, 'outbound', codes);
+            
             fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
                 .then(r => r.json())
                 .then(data => {
