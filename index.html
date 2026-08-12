@@ -4852,8 +4852,15 @@
         
         showLoading();
         try {
-            const url = `${API_URL}?action=stockTakeCompare&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}&codes=${encodeURIComponent(JSON.stringify(allCodes))}`;
-            const res = await fetchWithRetry(url);
+            const res = await fetchWithRetry(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'stockTakeCompare',
+                    supplier: supplier,
+                    gift: gift,
+                    codes: allCodes
+                })
+            });
             const data = await res.json();
             if (data.result === 'success') {
                 displayStResult(data);
