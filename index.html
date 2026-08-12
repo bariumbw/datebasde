@@ -708,6 +708,7 @@
 
 <script>
     // 請務必將此處更換為您的 Google Apps Script 部署網址
+    // 注意：如果出現 HTTP 404，請檢查 GAS 是否已重新部署，並更新下方的 API_URL
     const API_URL = "https://script.google.com/macros/s/AKfycbz204lvAxrDQULeXu708KVDS_hmXRRQ6aEUNhH1QtJmQSkzOkHjISkJZbJ96S6TxeWORA/exec";
     
     let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
@@ -2534,9 +2535,12 @@
     const TASK_STATUS_TEXT = { processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
     function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes) {
+        // 確保訂單號是字串，防止 Date 物件誤入
+        const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
+        
         processingStatuses.processing.push({
             id: id,
-            orderNo: orderNo,
+            orderNo: finalOrderNo,
             count: count,
             supplier: supplier,
             gift: gift,
@@ -2553,8 +2557,8 @@
         // 同步到 Google Sheet TaskMonitor（新增一列，狀態：處理中）
         logTaskToSheet({
             taskId: id,
-            taskType: supplier === '啟用作業' ? '啟用' : (orderNo.startsWith('入庫') ? '入庫' : '出庫'),
-            description: orderNo,
+            taskType: supplier === '啟用作業' ? '啟用' : (finalOrderNo.startsWith('入庫') ? '入庫' : '出庫'),
+            description: finalOrderNo,
             detail: supplier + ' - ' + gift,
             count: count,
             user: currentUser,
@@ -4784,16 +4788,20 @@
         const payload = {
             mode: 'use',
             user: currentUser,
+            channel: channel,
+            payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
+            allCodes: codes,
             recordInfo: {
                 orderNo: orderNo,
                 channel: channel,
-                reportMonth: rptMonth
-            },
-            payload: [{
+                reportMonth: rptMonth,
                 supplier: supplier,
-                name: gift,
-                codes: codes
-            }]
+                gift: gift,
+                start: codes[0],
+                end: codes[codes.length-1],
+                count: codes.length,
+                expiry: 'N/A'
+            }
         };
         
         addProcessingStatus(processId, `盤點補單: ${orderNo}`, codes.length, supplier, gift, startTime, codes[0], codes[codes.length-1], payload, 'outbound', codes);
