@@ -4696,9 +4696,8 @@
         status.style.color = '#666';
 
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetchWithRetry(API_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode: 'batchActivate', codes: codes })
             });
             const result = await res.json();
