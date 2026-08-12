@@ -121,6 +121,7 @@
                 <button id="nav-recordsPage" class="nav-btn" onclick="switchPage('recordsPage')">流水帳記錄管理</button>
                 <button id="nav-gsRecordsPage" class="nav-btn" onclick="switchPage('gsRecordsPage')">訂單記錄管理</button>
                 <button id="nav-dailyReportPage" class="nav-btn" onclick="switchPage('dailyReportPage')">每日報告</button>
+                <button id="nav-stockTakePage" class="nav-btn" onclick="switchPage('stockTakePage')">盤點作業</button>
             </nav>
 
             <!-- 統計儀表板 -->
@@ -592,6 +593,83 @@
                 <div id="drContent"></div>
             </div>
 
+            <!-- 盤點作業 -->
+            <div id="stockTakePage" class="page">
+                <h2>盤點作業</h2>
+                <div class="filter-bar">
+                    <div class="form-group"><label>供應商</label><select id="stSupplier" onchange="updateStGiftMenu()"><option value="">請選擇</option></select></div>
+                    <div class="form-group"><label>項目</label><select id="stGift"><option value="">請選擇</option></select></div>
+                </div>
+                
+                <div id="stBlocks">
+                    <!-- 動態增加區塊 -->
+                </div>
+                
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button id="addStBlockBtn" onclick="addStBlock()">+ 增加代碼區塊</button>
+                    <button onclick="runStCompare()" style="background: var(--primary-blue);">開始盤點比對</button>
+                </div>
+                
+                <div id="stResultArea" style="margin-top: 20px; display: none;">
+                    <h3>比對結果</h3>
+                    
+                    <div class="use-item-block" style="border-color: var(--danger-red);">
+                        <div class="item-label" style="background: var(--danger-red);">不在庫存 (系統查無紀錄)</div>
+                        <div id="stResNotInInv" style="margin-bottom: 10px;"></div>
+                        <button id="stBackfillBtn" onclick="stBackfillInbound()" style="display:none; background: var(--primary-blue);">補入庫 (標記為已啟動)</button>
+                    </div>
+                    
+                    <div class="use-item-block" style="border-color: var(--warning-orange);">
+                        <div class="item-label" style="background: var(--warning-orange);">已使用但還在庫存 (系統已標記為已使用)</div>
+                        <div id="stResAlreadyUsed"></div>
+                    </div>
+                    
+                    <div class="use-item-block" style="border-color: #9333ea;">
+                        <div class="item-label" style="background: #9333ea;">已使用但未啟動</div>
+                        <div id="stResUsedUnact" style="margin-bottom: 10px;"></div>
+                        <button id="stActivateBtn" onclick="stActivateUsed()" style="display:none; background: #9333ea;">批次啟用代碼</button>
+                    </div>
+
+                    <div class="use-item-block" style="border-color: #2563eb;">
+                        <div class="item-label" style="background: #2563eb;">庫存缺失 (系統有但實體無，且未使用)</div>
+                        <div id="stResMissing" style="margin-bottom: 10px;"></div>
+                        <button id="stOrderBtn" onclick="stBackfillOrder()" style="display:none; background: #2563eb;">補訂單</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 盤點補訂單 Modal -->
+            <div id="stOrderModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10001; align-items:center; justify-content:center;">
+                <div style="background:#fff; padding:20px; border-radius:12px; width:90%; max-width:400px; box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+                    <h3>盤點缺失補訂單</h3>
+                    <p id="stOrderInfo" style="font-size:13px; color:#666; margin-bottom:15px;"></p>
+                    <div class="form-group">
+                        <label>訂單號 (必填)</label>
+                        <input type="text" id="stOrderNo" placeholder="掃描或輸入訂單號">
+                    </div>
+                    <div class="form-group">
+                        <label>購買渠道</label>
+                        <select id="stOrderChannel">
+                            <option value="online">online</option>
+                            <option value="婚展">婚展</option>
+                            <option value="禮卡展">禮卡展</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Report 月份</label>
+                        <div style="display:flex; gap:6px;">
+                            <select id="stOrderYear" style="flex:1;"></select>
+                            <select id="stOrderMonth" style="flex:1;"></select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:20px;">
+                        <button onclick="stSubmitBackfillOrder()" style="flex:1; background:var(--primary-blue);">確認補單</button>
+                        <button onclick="document.getElementById('stOrderModal').style.display='none'" style="flex:1; background:#999;">取消</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -1019,6 +1097,7 @@
         if(p === 'statsPage') loadStats();
         if(p === 'eGiftPage') loadEGiftPending();
         if(p === 'dailyReportPage') initDailyReportPage();
+        if(p === 'stockTakePage') initStockTakePage();
     }
 
     async function loadStats(showLoader) {
@@ -4430,6 +4509,354 @@
     }
     // ===== END 每日報告 =====
 
-</script>
-</body>
-</html>
+    // ===== V3.7.6 盤點作業邏輯 =====
+    let stBlockCount = 0;
+    
+    function initStockTakePage() {
+        const suppliers = [...new Set(giftDatabase.map(c => c.supplier))];
+        const sel = document.getElementById('stSupplier');
+        sel.innerHTML = '<option value="">請選擇</option>' + suppliers.map(s => `<option value="${s}">${s}</option>`).join('');
+        document.getElementById('stGift').innerHTML = '<option value="">請選擇</option>';
+        document.getElementById('stBlocks').innerHTML = '';
+        document.getElementById('stResultArea').style.display = 'none';
+        stBlockCount = 0;
+        addStBlock();
+    }
+    
+    function updateStGiftMenu() {
+        const s = document.getElementById('stSupplier').value;
+        const g = document.getElementById('stGift');
+        g.innerHTML = '<option value="">請選擇</option>';
+        if (!s) return;
+        giftDatabase.filter(r => r.supplier === s).forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.name;
+            opt.text = r.name;
+            g.appendChild(opt);
+        });
+    }
+    
+    function addStBlock() {
+        stBlockCount++;
+        const id = stBlockCount;
+        const div = document.createElement('div');
+        div.className = 'use-item-block';
+        div.id = `stBlock_${id}`;
+        div.innerHTML = `
+            <div class="item-label">區塊 #${id}</div>
+            <button class="use-item-remove" onclick="removeStBlock(${id})">×</button>
+            <div class="reg-grid">
+                <div>
+                    <div class="form-group">
+                        <label>模式</label>
+                        <select id="stMode_${id}" onchange="toggleStMode(${id}, this.value)">
+                            <option value="range" selected>範圍輸入</option>
+                            <option value="list">清單輸入</option>
+                        </select>
+                    </div>
+                    <div id="stRange_${id}">
+                        <div class="form-group"><label>首碼</label><input type="text" id="stStart_${id}" oninput="calcStTotal(${id})"></div>
+                        <div class="form-group"><label>尾碼</label><input type="text" id="stEnd_${id}" oninput="calcStTotal(${id})"></div>
+                    </div>
+                    <div id="stList_${id}" style="display:none;">
+                        <div class="form-group"><label>代碼清單 (每行一個)</label><textarea id="stCodes_${id}" oninput="calcStTotal(${id})" style="height:80px;"></textarea></div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:center;">
+                    <h3 id="stTotal_${id}">數量: 0</h3>
+                </div>
+            </div>
+        `;
+        document.getElementById('stBlocks').appendChild(div);
+    }
+    
+    function removeStBlock(id) {
+        const block = document.getElementById(`stBlock_${id}`);
+        if (block) block.remove();
+    }
+    
+    function toggleStMode(id, mode) {
+        document.getElementById(`stRange_${id}`).style.display = mode === 'range' ? 'block' : 'none';
+        document.getElementById(`stList_${id}`).style.display = mode === 'list' ? 'block' : 'none';
+        calcStTotal(id);
+    }
+    
+    function calcStTotal(id) {
+        const mode = document.getElementById(`stMode_${id}`).value;
+        let count = 0;
+        if (mode === 'range') {
+            const start = document.getElementById(`stStart_${id}`).value.trim();
+            const end = document.getElementById(`stEnd_${id}`).value.trim();
+            if (start && end) {
+                const sNum = parseInt(start.replace(/\D/g, ''));
+                const eNum = parseInt(end.replace(/\D/g, ''));
+                if (!isNaN(sNum) && !isNaN(eNum) && eNum >= sNum) {
+                    count = eNum - sNum + 1;
+                }
+            }
+        } else {
+            const list = document.getElementById(`stCodes_${id}`).value.trim();
+            if (list) {
+                count = list.split('\n').filter(c => c.trim()).length;
+            }
+        }
+        document.getElementById(`stTotal_${id}`).innerText = `數量: ${count}`;
+    }
+    
+    async function runStCompare() {
+        const supplier = document.getElementById('stSupplier').value;
+        const gift = document.getElementById('stGift').value;
+        if (!supplier || !gift) { alert('請選擇供應商與項目'); return; }
+        
+        const allCodes = [];
+        const blocks = document.getElementById('stBlocks').children;
+        for (let block of blocks) {
+            const idMatch = block.id.match(/\d+$/);
+            if (!idMatch) continue;
+            const id = idMatch[0];
+            const mode = document.getElementById(`stMode_${id}`).value;
+            if (mode === 'range') {
+                const start = document.getElementById(`stStart_${id}`).value.trim();
+                const end = document.getElementById(`stEnd_${id}`).value.trim();
+                if (start && end) {
+                    const sNum = parseInt(start.replace(/\D/g, ''));
+                    const eNum = parseInt(end.replace(/\D/g, ''));
+                    const prefix = start.replace(/\d+$/, '');
+                    const lenMatch = start.match(/\d+$/);
+                    const len = lenMatch ? lenMatch[0].length : 0;
+                    for (let i = sNum; i <= eNum; i++) {
+                        allCodes.push(prefix + String(i).padStart(len, '0'));
+                    }
+                }
+            } else {
+                const list = document.getElementById(`stCodes_${id}`).value.trim();
+                if (list) {
+                    list.split('\n').forEach(c => { if(c.trim()) allCodes.push(c.trim()); });
+                }
+            }
+        }
+        
+        if (allCodes.length === 0) { alert('請輸入代碼'); return; }
+        
+        showLoading();
+        try {
+            const url = `${API_URL}?action=stockTakeCompare&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}&codes=${encodeURIComponent(JSON.stringify(allCodes))}`;
+            const res = await fetchWithRetry(url);
+            const data = await res.json();
+            if (data.result === 'success') {
+                displayStResult(data);
+            } else {
+                alert('比對失敗: ' + (data.message || '未知錯誤'));
+            }
+        } catch (e) {
+            alert('比對失敗: ' + e.message);
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    function displayStResult(data) {
+        document.getElementById('stResultArea').style.display = 'block';
+        
+        const stResNotInInv = document.getElementById('stResNotInInv');
+        if (data.notInInventory && data.notInInventory.length > 0) {
+            stResNotInInv.innerHTML = `<p style="color:red; font-weight:bold;">共 ${data.notInInventory.length} 張不在系統中：</p>` + 
+                                       `<div class="code-list-mini">${data.notInInventory.join(', ')}</div>`;
+            document.getElementById('stBackfillBtn').style.display = 'inline-block';
+            document.getElementById('stBackfillBtn').setAttribute('data-codes', JSON.stringify(data.notInInventory));
+        } else {
+            stResNotInInv.innerHTML = '<p style="color:green;">✅ 所有代碼皆在庫存中</p>';
+            document.getElementById('stBackfillBtn').style.display = 'none';
+        }
+        
+        const stResAlreadyUsed = document.getElementById('stResAlreadyUsed');
+        if (data.alreadyUsed && data.alreadyUsed.length > 0) {
+            stResAlreadyUsed.innerHTML = `<p style="color:orange; font-weight:bold;">共 ${data.alreadyUsed.length} 張系統標記為「已使用」但實體仍在手上：</p>` + 
+                                         `<div class="code-list-mini">${data.alreadyUsed.join(', ')}</div>`;
+        } else {
+            stResAlreadyUsed.innerHTML = '<p style="color:green;">✅ 無已使用代碼在實體盤點中</p>';
+        }
+        
+        const stResUsedUnact = document.getElementById('stResUsedUnact');
+        if (data.usedButNotActivated && data.usedButNotActivated.length > 0) {
+            stResUsedUnact.innerHTML = `<p style="color:#9333ea; font-weight:bold;">共 ${data.usedButNotActivated.length} 張已使用但「未啟動」：</p>` + 
+                                        `<div class="code-list-mini">${data.usedButNotActivated.join(', ')}</div>`;
+            document.getElementById('stActivateBtn').style.display = 'inline-block';
+            document.getElementById('stActivateBtn').setAttribute('data-codes', JSON.stringify(data.usedButNotActivated));
+        } else {
+            stResUsedUnact.innerHTML = '<p style="color:green;">✅ 無未啟動的已使用代碼</p>';
+            document.getElementById('stActivateBtn').style.display = 'none';
+        }
+
+        const stResMissing = document.getElementById('stResMissing');
+        if (data.missingButUnused && data.missingButUnused.length > 0) {
+            let html = `<p style="color:#2563eb; font-weight:bold; margin-bottom:8px;">共 ${data.missingButUnused.length} 張系統在庫但實體盤點缺失：</p>`;
+            html += `<div style="margin-bottom:8px; font-size:12px;"><label><input type="checkbox" onchange="toggleAllStMissing(this)"> 全選</label></div>`;
+            html += `<div class="code-list-mini" style="max-height:150px; overflow-y:auto; border:1px solid #eee; padding:5px; border-radius:4px;">`;
+            data.missingButUnused.forEach(code => {
+                html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:2px 0; border-bottom:1px solid #f9f9f9;">
+                    <label style="margin:0; font-weight:normal;"><input type="checkbox" class="st-missing-chk" value="${code}"> ${code}</label>
+                    <button class="clear-btn" style="padding:2px 6px; font-size:10px; background:var(--primary-blue); color:#fff; border:none;" onclick='stBackfillOrder(["${code}"])'>補單</button>
+                </div>`;
+            });
+            html += `</div>`;
+            stResMissing.innerHTML = html;
+            document.getElementById('stOrderBtn').style.display = 'inline-block';
+            document.getElementById('stOrderBtn').onclick = function() {
+                const selected = Array.from(document.querySelectorAll('.st-missing-chk:checked')).map(cb => cb.value);
+                if (selected.length === 0) { alert('請先勾選要補單的代碼'); return; }
+                stBackfillOrder(selected);
+            };
+        } else {
+            stResMissing.innerHTML = '<p style="color:green;">✅ 無缺失代碼</p>';
+            document.getElementById('stOrderBtn').style.display = 'none';
+        }
+    }
+
+    function toggleAllStMissing(el) {
+        document.querySelectorAll('.st-missing-chk').forEach(cb => cb.checked = el.checked);
+    }
+
+    let stPendingCodes = [];
+
+    function stBackfillOrder(codes) {
+        if (!codes || codes.length === 0) return;
+        stPendingCodes = codes;
+        const supplier = document.getElementById('stSupplier').value;
+        const gift = document.getElementById('stGift').value;
+        
+        const modal = document.getElementById('stOrderModal');
+        document.getElementById('stOrderInfo').innerText = `${supplier} - ${gift} (共 ${codes.length} 張)`;
+        document.getElementById('stOrderNo').value = '';
+        
+        // 初始化 Report 月份
+        const yearSel = document.getElementById('stOrderYear');
+        const monthSel = document.getElementById('stOrderMonth');
+        const thisYear = new Date().getFullYear();
+        yearSel.innerHTML = [thisYear-1, thisYear, thisYear+1].map(y => `<option value="${y}" ${y===thisYear?'selected':''}>${y}</option>`).join('');
+        monthSel.innerHTML = Array.from({length:12}, (_,i) => {
+            const m = (i+1).toString().padStart(2,'0');
+            return `<option value="${m}" ${m===(new Date().getMonth()+1).toString().padStart(2,'0')?'selected':''}>${i+1}月</option>`;
+        }).join('');
+        
+        modal.style.display = 'flex';
+    }
+
+    async function stSubmitBackfillOrder() {
+        const orderNo = document.getElementById('stOrderNo').value.trim();
+        if (!orderNo) { alert('請輸入訂單號'); return; }
+        
+        const codes = stPendingCodes;
+        const supplier = document.getElementById('stSupplier').value;
+        const gift = document.getElementById('stGift').value;
+        const channel = document.getElementById('stOrderChannel').value;
+        const year = document.getElementById('stOrderYear').value;
+        const month = document.getElementById('stOrderMonth').value;
+        const rptMonth = `${year}-${month}`;
+        
+        document.getElementById('stOrderModal').style.display = 'none';
+        
+        const processId = generateProcessId();
+        const startTime = new Date();
+        const payload = {
+            mode: 'use',
+            user: currentUser,
+            recordInfo: {
+                orderNo: orderNo,
+                channel: channel,
+                reportMonth: rptMonth
+            },
+            payload: [{
+                supplier: supplier,
+                name: gift,
+                codes: codes
+            }]
+        };
+        
+        addProcessingStatus(processId, `盤點補單: ${orderNo}`, codes.length, supplier, gift, startTime, codes[0], codes[codes.length-1], payload, 'outbound', codes);
+        showToast('已加入處理監控');
+        
+        fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    updateProcessingStatus(processId, 'completed', startTime);
+                    showToast('補單成功');
+                    loadStats(false);
+                } else {
+                    updateProcessingStatus(processId, 'problem', startTime, data.message || '補單失敗');
+                }
+            })
+            .catch(e => {
+                updateProcessingStatus(processId, 'problem', startTime, e.message);
+            });
+    }
+    
+    async function stBackfillInbound() {
+        const codes = JSON.parse(document.getElementById('stBackfillBtn').getAttribute('data-codes'));
+        const supplier = document.getElementById('stSupplier').value;
+        const gift = document.getElementById('stGift').value;
+        if (!confirm(`確定要將這 ${codes.length} 張代碼補入庫並標記為「已啟動」？`)) return;
+        
+        const processId = generateProcessId();
+        const startTime = new Date();
+        const payload = {
+            mode: 'register',
+            supplier: supplier,
+            gift: gift,
+            codes: codes,
+            activated: true,
+            reportMonth: new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'),
+            payload: codes.map(c => ({Batch: currentBatch, Supplier: supplier, GiftName: gift, Code: c}))
+        };
+        
+        addProcessingStatus(processId, `盤點補入庫: ${supplier}/${gift}`, codes.length, supplier, gift, startTime, codes[0], codes[codes.length-1], payload, 'inbound', codes);
+        showToast('已加入處理監控');
+        
+        fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    updateProcessingStatus(processId, 'completed', startTime);
+                    showToast('補入庫成功');
+                    loadStats(false);
+                } else {
+                    updateProcessingStatus(processId, 'problem', startTime, data.message || '補入庫失敗');
+                }
+            })
+            .catch(e => {
+                updateProcessingStatus(processId, 'problem', startTime, e.message);
+            });
+    }
+    
+    async function stActivateUsed() {
+        const codes = JSON.parse(document.getElementById('stActivateBtn').getAttribute('data-codes'));
+        const supplier = document.getElementById('stSupplier').value;
+        const gift = document.getElementById('stGift').value;
+        if (!confirm(`確定要啟用這 ${codes.length} 張代碼？`)) return;
+        
+        const processId = generateProcessId();
+        const startTime = new Date();
+        const payload = {
+            mode: 'batchActivate',
+            codes: codes
+        };
+        
+        addProcessingStatus(processId, `盤點啟用: ${supplier}/${gift}`, codes.length, '啟用作業', '盤點啟用', startTime, codes[0], codes[codes.length-1], payload, 'inbound', codes);
+        showToast('已加入處理監控');
+        
+        fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    updateProcessingStatus(processId, 'completed', startTime);
+                    showToast('啟用成功');
+                } else {
+                    updateProcessingStatus(processId, 'problem', startTime, data.message || '啟用失敗');
+                }
+            })
+            .catch(e => {
+                updateProcessingStatus(processId, 'problem', startTime, e.message);
+            });
+    }
+</script></body></html>
