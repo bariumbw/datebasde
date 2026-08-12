@@ -4014,7 +4014,12 @@
                 return;
             }
             const reportMonth = `${ry.value}-${rm.value}`;
-            updateEGiftStatus(row, 'sent', true, reportMonth);
+            
+            // V3.7.6 防重機制：點擊後立即鎖定 checkbox，防止重複觸發
+            checkbox.disabled = true;
+            updateEGiftStatus(row, 'sent', true, reportMonth).catch(() => {
+                checkbox.disabled = false;
+            });
         } else {
             updateEGiftStatus(row, 'sent', false, '');
         }
@@ -4047,7 +4052,7 @@
 
             addProcessingStatus(processId, orderNo, qty, supplier, giftName, startTime, codeStart, codeEnd, payload, 'outbound', codes);
             
-            fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
+            return fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
                 .then(r => r.json())
                 .then(data => {
                     if (data.result === 'success') {
@@ -4057,13 +4062,14 @@
                     } else {
                         updateProcessingStatus(processId, 'problem', startTime, data.message || '發出失敗');
                         loadEGiftPending();
+                        throw new Error(data.message);
                     }
                 })
                 .catch(err => {
                     updateProcessingStatus(processId, 'problem', startTime, err.message || '網路錯誤');
                     loadEGiftPending();
+                    throw err;
                 });
-            return;
         }
 
         // 其他欄位更新（submitted, made）仍用原來的方式
