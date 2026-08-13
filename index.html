@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>禮券管理系統 V3.5.5 - 出庫處理狀態監控版</title>
+    <title>禮券全能管理系統 V3.5.5 - 出庫處理狀態監控版</title>
     <style>
     :root {
         --primary-pink: #ffb7c5;
@@ -100,7 +100,7 @@
 <div class="main-wrapper">
     <div class="container">
         <div id="loginPage" class="page active">
-            <h2>禮券管理系統 V3.7.6</h2>
+            <h2>禮券全能管理系統 V3.7.6</h2>
             <div class="form-group"><label>Email</label><input type="email" id="loginEmail"></div>
             <div class="form-group"><label>密碼</label><input type="password" id="loginCode"></div>
             <button onclick="handleLogin()" style="width:100%; margin-bottom: 15px;">登入系統</button>
@@ -1975,10 +1975,15 @@
                 addedCount++;
             });
             // 新增已使用的代碼
-            (data.newUsed || []).forEach(code => {
+            (data.newUsed || []).forEach(item => {
+                // item 可能是字串（舊版）或物件 {code, supplier, giftName}（新版）
+                const code = typeof item === 'object' ? item.code : item;
                 const canon = canonCodeLocal(code);
                 localUsedSet.add(canon);
-                delete localCodeIndex[canon]; // 從未使用中移除
+                // V3.7.6: 不再從 localCodeIndex 移除，以便識別功能能找到已使用的券
+                if (typeof item === 'object') {
+                    localCodeIndex[canon] = { supplier: item.supplier, giftName: item.giftName, storedCode: item.code };
+                }
             });
             lastCacheTime = data.serverTime || new Date().toISOString();
             localStorage.setItem('lastCacheTime', lastCacheTime);
@@ -2011,31 +2016,25 @@
             candidates.push([tail6.substring(0, tail6.length - 1), 61]);
         }
 
-        // 1. 先查未使用庫存 (localCodeIndex)
+        // V3.7.6 修正：合併查庫存邏輯，優先回傳包含供應商資訊的結果
         for (let c = 0; c < candidates.length; c++) {
             const canon = canonCodeLocal(candidates[c][0]);
             const hit = localCodeIndex[canon];
+            const isUsed = localUsedSet && localUsedSet.has(canon);
+            
             if (hit) {
                 const calcType = localCalcTypeMap[hit.supplier + '|' + hit.giftName] || 'normal';
                 return {
                     success: true,
-                    isUsed: false,
+                    isUsed: isUsed,
                     supplier: hit.supplier,
                     giftName: hit.giftName,
                     matchedCode: hit.storedCode || candidates[c][0],
                     strippedDigits: candidates[c][1],
                     calcType: calcType
                 };
-            }
-        }
-
-        // 2. 再查已使用庫存 (localUsedSet)
-        // 註：因為 localUsedSet 只有代碼沒有供應商資訊，我們需要查後端，
-        // 但為了加速，如果能從 calcTypeMap 猜測規則並匹配成功，至少能告知「已使用」
-        for (let c = 0; c < candidates.length; c++) {
-            const canon = canonCodeLocal(candidates[c][0]);
-            if (localUsedSet && localUsedSet.has(canon)) {
-                // 找到已使用的代碼，但不知道具體供應商。這裡返回一個特殊標記，讓 localDetectSupplierN 決定是否 fallback 到後端。
+            } else if (isUsed) {
+                // 只有已使用標記但沒供應商資訊（罕見，通常是增量更新異常）
                 return {
                     success: true,
                     isUsed: true,
@@ -2302,15 +2301,11 @@
             const alreadyUsed = [];
             for (const c of codes) {
                 const canon = canonCodeLocal(c);
-                // V3.7.6 修正：檢查代碼是否在 localCodeIndex 中，如果不在則為未入庫
-                if (!localCodeIndex[canon]) {
+                // V3.7.6 修正：優先檢查是否已使用，再檢查是否存在於庫存
+                if (localUsedSet && localUsedSet.has(canon)) {
+                    alreadyUsed.push(c);
+                } else if (!localCodeIndex[canon]) {
                     notRegistered.push(c);
-                } else {
-                    // 如果在 localCodeIndex 中，再檢查 localUsedSet 或 status
-                    const info = localCodeIndex[canon];
-                    if ((localUsedSet && localUsedSet.has(canon)) || info.status === '已使用' || info.status === '已出庫') {
-                        alreadyUsed.push(c);
-                    }
                 }
             }
             if (itemCurrentUseCodes[n] !== codes) return;
