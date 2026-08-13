@@ -1697,6 +1697,7 @@
     let itemLastDetectedCodes = [null];
     let itemLastDetectInfos = [null];
     let itemCurrentUseCodes = [null];
+    let itemCurrentOriginalCodes = [null]; // V3.7.6: 儲存原始輸入代碼
     let itemCurrentUseMatches = [null];
 
     // 元素 ID 輔助函數：n=0 用原始 ID，n>=1 用 _N 後綴
@@ -1786,6 +1787,7 @@
         itemLastDetectedCodes[n] = null;
         itemLastDetectInfos[n] = null;
         itemCurrentUseCodes[n] = null;
+        itemCurrentOriginalCodes[n] = null;
         itemCurrentUseMatches[n] = null;
         document.getElementById('addItemBtn').disabled = false;
         updateUseItemsSummary();
