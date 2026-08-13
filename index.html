@@ -183,7 +183,7 @@
                     <h2>登記入庫 (Batch: <span id="batchDisplay">...</span>)</h2>
                     <div style="display: flex; gap: 8px;">
                         <button onclick="window.open('file:///Users/business/Downloads/batch_inbound_tool.html', '_blank')" style="background: #0071e3; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;">開啟離線入庫工具</button>
-                        <a href="batch_inbound_tool.html" download style="background: #34c759; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center;">下載工具 HTML</a>
+                        <button onclick="downloadInboundTool()" style="background: #34c759; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;">下載工具 HTML</button>
                     </div>
                 </div>
                 <div class="reg-grid">
@@ -251,7 +251,10 @@
 
             <!-- 禮券使用 -->
             <div id="usePage" class="page active">
-                <h2 style="display:flex; align-items:center; gap:12px;">禮券使用 (出庫) <button id="refreshCacheBtn" onclick="manualUpdateCodeIndex()" style="font-size:12px; padding:4px 10px; background:#f0f0f0; border:1px solid #ccc; border-radius:4px; cursor:pointer;">重新載入識別快取</button></h2>
+                <h2 style="display:flex; align-items:center; gap:12px;">禮券使用 (出庫) 
+                    <button id="refreshCacheBtn" onclick="manualUpdateCodeIndex()" style="font-size:12px; padding:4px 10px; background:#f0f0f0; border:1px solid #ccc; border-radius:4px; cursor:pointer;">重新載入識別快取</button>
+                    <button id="adminSheetBtn" onclick="window.open('https://docs.google.com/spreadsheets/d/1YS4yWghDpXRc8orUW2TlK0hlylQw4ipKfzOwOJsOvAk/edit?usp=sharing', '_blank')" style="display:none; font-size:12px; padding:4px 10px; background:#e3f2fd; color:#1976d2; border:1px solid #1976d2; border-radius:4px; cursor:pointer;">開啟後端管理表</button>
+                </h2>
                 <div id="problemItemBanner" style="display:none; margin-bottom:12px; padding:10px 14px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
                     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                         <div style="font-size:13px;"><strong>ℹ️ 正在處理問題項目：</strong><span id="problemItemInfo"></span></div>
@@ -691,7 +694,10 @@
 
     <!-- 右側狀態面板 -->
     <div class="status-panel" id="statusPanel">
-        <h3>處理監控</h3>
+        <h3 style="display:flex; justify-content:space-between; align-items:center;">
+            處理監控
+            <button onclick="loadTaskMonitor()" style="font-size:11px; padding:2px 8px; background:#f8f9fa; border:1px solid #ddd; border-radius:4px; cursor:pointer; color:#666;">刷新監控</button>
+        </h3>
         
         <div class="status-panel-upper">
             <div class="status-section">
@@ -1098,7 +1104,9 @@
 
     // Role-based 預設
     function applyRoleDefaults() {
+        const adminBtn = document.getElementById('adminSheetBtn');
         if (currentRole === 'Admin') {
+            if (adminBtn) adminBtn.style.display = 'inline-block';
             // Admin: 預設購買渠道 = online, Report月份展開
             const onlineRadio = document.querySelector('input[name="useChannel"][value="online"]');
             if (onlineRadio) onlineRadio.checked = true;
@@ -1107,6 +1115,7 @@
             const arrow = panel ? panel.previousElementSibling.querySelector('.toggle-arrow') : null;
             if (arrow) arrow.textContent = '▼';
         } else {
+            if (adminBtn) adminBtn.style.display = 'none';
             // Staff: 預設購買渠道 = 婚展, Report月份收起
             const cardRadio = document.querySelector('input[name="useChannel"][value="婚展"]');
             if (cardRadio) cardRadio.checked = true;
@@ -2001,12 +2010,16 @@
             var tail6 = rawCode.substring(rawCode.length - 6);
             candidates.push([tail6.substring(0, tail6.length - 1), 61]);
         }
+
+        // 1. 先查未使用庫存 (localCodeIndex)
         for (let c = 0; c < candidates.length; c++) {
-            const hit = localCodeIndex[canonCodeLocal(candidates[c][0])];
+            const canon = canonCodeLocal(candidates[c][0]);
+            const hit = localCodeIndex[canon];
             if (hit) {
                 const calcType = localCalcTypeMap[hit.supplier + '|' + hit.giftName] || 'normal';
                 return {
                     success: true,
+                    isUsed: false,
                     supplier: hit.supplier,
                     giftName: hit.giftName,
                     matchedCode: hit.storedCode || candidates[c][0],
@@ -2015,6 +2028,23 @@
                 };
             }
         }
+
+        // 2. 再查已使用庫存 (localUsedSet)
+        // 註：因為 localUsedSet 只有代碼沒有供應商資訊，我們需要查後端，
+        // 但為了加速，如果能從 calcTypeMap 猜測規則並匹配成功，至少能告知「已使用」
+        for (let c = 0; c < candidates.length; c++) {
+            const canon = canonCodeLocal(candidates[c][0]);
+            if (localUsedSet && localUsedSet.has(canon)) {
+                // 找到已使用的代碼，但不知道具體供應商。這裡返回一個特殊標記，讓 localDetectSupplierN 決定是否 fallback 到後端。
+                return {
+                    success: true,
+                    isUsed: true,
+                    matchedCode: candidates[c][0],
+                    strippedDigits: candidates[c][1]
+                };
+            }
+        }
+
         return null; // 本地找不到
     }
 
@@ -2086,22 +2116,28 @@
 
         // ★ 先嘗試本地識別（毫秒級）
         const localResult = localDetectFromCache(code);
-        if (localResult) {
+        if (localResult && !localResult.isUsed) {
             detectCache[code] = localResult;
             itemLastDetectedCodes[n] = code;
             itemLastDetectInfos[n] = localResult;
             if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = localResult; }
-            setDetectStatusN(n, 'found', `\u2713 \u5df2\u8b58\u5225: ${localResult.supplier} / ${localResult.giftName}` + (localResult.strippedDigits ? `\uff08\u5165\u5eab\u4ee3\u78bc: ${localResult.matchedCode}\uff0c${localResult.strippedDigits >= 6 ? `\u5df2\u81ea\u52d5\u53d6\u5c3e ${localResult.strippedDigits} \u4f4d` : `\u5df2\u81ea\u52d5\u53bb\u9664\u5c3e\u78bc ${localResult.strippedDigits} \u4f4d`}\uff09` : ''));
+            const digitInfo = localResult.strippedDigits ? `（入庫代碼: ${localResult.matchedCode}，${localResult.strippedDigits >= 6 ? `已自動取尾 ${localResult.strippedDigits} 位` : `已自動去除尾碼 ${localResult.strippedDigits} 位`}）` : '';
+            setDetectStatusN(n, 'found', `✓ 已識別: ${localResult.supplier} / ${localResult.giftName} ${digitInfo}`);
             applyLocalMatchN(n, localResult.supplier, localResult.giftName);
             return;
         }
+        
+        // 如果本地發現是已使用，或者完全找不到，則需要 fallback 到後端查詳細資訊（供應商/項目）
+        // 這樣即使代碼已出庫，也能顯示出原本的供應商資訊，而不是顯示「未找到」
 
-        // ★ 本地找不到：如果本地快取已載入，直接顯示未找到（不 fallback 到後端，避免被入庫影響）
-        if (localCacheLoaded) {
+        // ★ 本地找不到或已使用：
+        // 如果是已使用 (isUsed)，即使 localCacheLoaded 也要 fallback 到後端獲取供應商資訊
+        // 如果是完全找不到，則根據 localCacheLoaded 決定是否顯示「未找到」
+        if (localCacheLoaded && (!localResult || !localResult.isUsed)) {
             detectCache[code] = { success: false };
             itemLastDetectInfos[n] = null;
             if (n === 0) window.lastDetectInfo = null;
-            setDetectStatusN(n, 'notfound', '\u2717 \u672a\u627e\u5230\uff08\u8acb\u624b\u52d5\u9078\u64c7\u6216\u91cd\u65b0\u8f09\u5165\u8b58\u5225\u5feb\u53d6\uff09');
+            setDetectStatusN(n, 'notfound', '✗ 沒找到對應的供應商/項目（請確認代碼已入庫，或手動選擇）');
             return;
         }
         // 快取未載入時才 fallback 到後端
@@ -2115,7 +2151,9 @@
                         itemLastDetectedCodes[n] = code;
                         itemLastDetectInfos[n] = d;
                         if (n === 0) { lastDetectedCode = code; window.lastDetectInfo = d; }
-                        setDetectStatusN(n, 'found', `\u2713 \u5df2\u8b58\u5225: ${d.supplier} / ${d.giftName}` + (d.strippedDigits ? `\uff08\u5165\u5eab\u4ee3\u78bc: ${d.matchedCode}\uff0c${d.strippedDigits >= 6 ? `\u5df2\u81ea\u52d5\u53d6\u5c3e ${d.strippedDigits} \u4f4d` : `\u5df2\u81ea\u52d5\u53bb\u9664\u5c3e\u78bc ${d.strippedDigits} \u4f4d`}\uff09` : ''));
+                        const digitInfo = d.strippedDigits ? `（入庫代碼: ${d.matchedCode}，${d.strippedDigits >= 6 ? `已自動取尾 ${d.strippedDigits} 位` : `已自動去除尾碼 ${d.strippedDigits} 位`}）` : '';
+                        const usedTag = (localResult && localResult.isUsed) ? '<span style="color:#ef4444;">[已使用過]</span> ' : '';
+                        setDetectStatusN(n, 'found', `✓ 已識別: ${usedTag}${d.supplier} / ${d.giftName} ${digitInfo}`);
                         applyLocalMatchN(n, d.supplier, d.giftName);
                     } else {
                         itemLastDetectInfos[n] = null;
@@ -2352,13 +2390,15 @@
         for (const n of activeIndices) {
             const codes = itemCurrentUseCodes[n];
             const match = itemCurrentUseMatches[n];
+            const modeEl = useEl('useMode', n);
+            const useMode = modeEl ? modeEl.value : 'range';
             if (!codes || codes.length === 0 || !match) {
                 alert(`品項 ${n + 1} 尚未完成設定（請確認已選擇供應商/項目並輸入代碼）`);
                 return;
             }
             const warningEl = useEl('usageWarning', n);
             const hasDup = warningEl && warningEl.style.display === 'block';
-            itemsToSubmit.push({ n, codes, match, hasDup });
+            itemsToSubmit.push({ n, codes, match, hasDup, useMode });
         }
 
         // V3.7.5: 不檢查使用狀態，已使用不影響再出庫（第1次→G/H/I，第2次→J/K/L，第3次→V/W/X）
@@ -2406,7 +2446,7 @@
 
         // 逐品項提交（各自獨立的 Task Center 條目）
         for (const item of itemsToSubmit) {
-            const { codes, match, n } = item;
+            const { codes, match, n, useMode } = item;
             const originalCodes = itemCurrentOriginalCodes[n] || codes;
             const expiry = calculateExpiryDate(match.rule1);
             const processId = generateProcessId();
@@ -2417,6 +2457,7 @@
                 channel: channel,
                 payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
                 allCodes: codes,
+                useMode: useMode, // 記錄原始輸入模式
                 recordInfo: {
                     supplier: match.supplier,
                     gift: match.name,
@@ -2426,7 +2467,8 @@
                     orderNo: orderNo,
                     expiry: expiry,
                     channel: channel,
-                    reportMonth: reportMonth
+                    reportMonth: reportMonth,
+                    useMode: useMode
                 }
             };
 
@@ -2491,7 +2533,11 @@
     // 將監控任務同步寫入 Google Sheet 的 TaskMonitor 工作表（背景執行，不阻擋操作，失敗不影響前端顯示）
     function logTaskToSheet(task) {
         try {
-            fetch(API_URL, { method: 'POST', body: JSON.stringify({ mode: 'logTask', task: task }) }).catch(() => {});
+            // 使用 fetchWithRetry 確保狀態同步更可靠，但不顯示錯誤提示以防干擾用戶
+            fetchWithRetry(API_URL, { 
+                method: 'POST', 
+                body: JSON.stringify({ mode: 'logTask', task: task }) 
+            }).catch(e => console.warn('Task status sync failed:', e));
         } catch (e) { /* 忽略同步失敗，不影響主流程 */ }
     }
 
@@ -2502,11 +2548,28 @@
             const tasks = await res.json();
             if (!Array.isArray(tasks)) return;
             // 清空現有狀態（從後端重新載入）
+            processingStatuses.waiting = [];
+            processingStatuses.processing = [];
             processingStatuses.problem = [];
             processingStatuses.completed = [];
             processingStatuses.solved = [];
-            // 保留當前 session 正在處理中的任務（不覆蓋）
+            
+            // 去重：如果後端返回了重複的 ID，只保留最新的狀態
+            const uniqueTasksMap = new Map();
             tasks.forEach(t => {
+                const tid = t.taskId || t.id;
+                if (!uniqueTasksMap.has(tid)) {
+                    uniqueTasksMap.set(tid, t);
+                } else {
+                    const existing = uniqueTasksMap.get(tid);
+                    const terminalStates = ['已完成', '問題已解決', 'completed', 'solved', '問題已解決'];
+                    if (terminalStates.includes(t.status) && !terminalStates.includes(existing.status)) {
+                        uniqueTasksMap.set(tid, t);
+                    }
+                }
+            });
+
+            Array.from(uniqueTasksMap.values()).forEach(t => {
                 const detailParts = (t.detail || '').split(' - ');
                 const tSupplier = detailParts[0] || t.supplier || '未知供應商';
                 const tGift = detailParts[1] || t.gift || '未知項目';
@@ -2547,23 +2610,26 @@
                     user: t.user || '',
                     retryPayload: reconstructedPayload,
                     sourceType: t.sourceType || 'outbound',
-                    allCodes: t.allCodes || []
+                    allCodes: t.allCodes || [],
+                    originalCodes: t.originalCodes || [],
+                    useMode: t.useMode || 'range'
                 };
                 if (t.status === '有問題' || t.status === 'problem') {
                     processingStatuses.problem.push(statusItem);
-            } else if (t.status === '排隊中' || t.status === 'waiting') {
-                statusItem.status = 'waiting';
-                processingStatuses.waiting.push(statusItem);
-            } else if (t.status === '處理中' || t.status === 'processing') {
-                // 如果後端仍顯示處理中但已經過了很久，可能是異常終止，標記為問題
-                const elapsed = (new Date() - new Date(t.startTime)) / 1000;
-                if (elapsed > 300) { // 超過 5 分鐘仍在處理中，視為異常
-                    statusItem.status = 'problem';
-                    statusItem.errorMsg = statusItem.errorMsg || '處理逾時（可能已異常終止）';
-                    processingStatuses.problem.push(statusItem);
-                } else {
-                    processingStatuses.processing.push(statusItem);
-                }
+                } else if (t.status === '排隊中' || t.status === 'waiting') {
+                    statusItem.status = 'waiting';
+                    processingStatuses.waiting.push(statusItem);
+                } else if (t.status === '處理中' || t.status === 'processing') {
+                    // 如果後端仍顯示處理中但已經過了很久，可能是異常終止，標記為問題
+                    const elapsed = (new Date() - new Date(t.startTime)) / 1000;
+                    if (elapsed > 300) { // 超過 5 分鐘仍在處理中，視為異常
+                        statusItem.status = 'problem';
+                        statusItem.duration = elapsed.toFixed(1);
+                        statusItem.errorMsg = statusItem.errorMsg || '處理逾時（可能已異常終止）';
+                        processingStatuses.problem.push(statusItem);
+                    } else {
+                        processingStatuses.processing.push(statusItem);
+                    }
             } else if (t.status === '已完成' || t.status === 'completed') {
                     if (processingStatuses.completed.length < 3) {
                         processingStatuses.completed.push(statusItem);
@@ -2575,12 +2641,14 @@
                 }
             });
             updateStatusDisplay();
+            // 載入後啟動排隊中的任務
+            processQueue();
         } catch (e) { /* 載入失敗不影響主流程 */ }
     }
 
     const TASK_STATUS_TEXT = { waiting: '排隊中', processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
-    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes, originalCodes) {
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes, originalCodes, useMode) {
         const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
         const finalSourceType = sourceType || 'outbound';
         const finalAllCodes = allCodes || [];
@@ -2601,7 +2669,8 @@
             retryPayload: retryPayload || null,
             sourceType: finalSourceType,
             allCodes: finalAllCodes,
-            originalCodes: originalCodes || []
+            originalCodes: originalCodes || [],
+            useMode: useMode || (retryPayload ? retryPayload.useMode : 'range')
         };
 
         processingStatuses.waiting.push(task);
@@ -2621,7 +2690,9 @@
             channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : (retryPayload ? retryPayload.channel || '' : ''),
             reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : (retryPayload ? retryPayload.reportMonth || '' : ''),
             sourceType: finalSourceType,
-            allCodes: finalAllCodes
+            allCodes: finalAllCodes,
+            originalCodes: originalCodes || [],
+            useMode: useMode || (retryPayload ? retryPayload.useMode : 'range')
         });
 
         processQueue();
@@ -2653,7 +2724,9 @@
             channel: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.channel || '' : (task.retryPayload ? task.retryPayload.channel || '' : ''),
             reportMonth: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.reportMonth || '' : (task.retryPayload ? task.reportMonth || '' : ''),
             sourceType: task.sourceType,
-            allCodes: task.allCodes
+            allCodes: task.allCodes,
+            originalCodes: task.originalCodes || [],
+            useMode: task.useMode || (task.retryPayload ? task.retryPayload.useMode : 'range')
         });
 
         try {
@@ -2765,16 +2838,21 @@
             channel: (item.retryPayload && item.retryPayload.recordInfo) ? item.retryPayload.recordInfo.channel || '' : (item.retryPayload ? item.retryPayload.channel || '' : ''),
             reportMonth: (item.retryPayload && item.retryPayload.recordInfo) ? item.retryPayload.recordInfo.reportMonth || '' : (item.retryPayload ? item.reportMonth || '' : ''),
             sourceType: item.sourceType,
-            allCodes: item.allCodes
+            allCodes: item.allCodes,
+            originalCodes: item.originalCodes || [],
+            useMode: item.useMode || (item.retryPayload ? item.retryPayload.useMode : 'range')
         });
     }
 
     function markProblemAsSolved(id) {
         const problem = processingStatuses.problem.find(p => p.id === id);
         if (problem) {
+            // 立即從問題清單移除，優化用戶體驗
+            processingStatuses.problem = processingStatuses.problem.filter(p => p.id !== id);
             // 先把項目放回 processing 清單讓 updateProcessingStatus 能找到它
             processingStatuses.processing.push(problem);
             updateProcessingStatus(id, 'solved', problem.startTime, problem.errorMsg || '');
+            updateStatusDisplay();
         }
     }
 
@@ -2793,17 +2871,32 @@
             const supEl = useEl('useSupplierSelect', 0);
             if (supEl) supEl.value = info.supplier || '';
             useUpdateGiftSelectN(0, info.gift || '');
-            // 填入完整代碼清單（優先）或首尾碼
-            const codesEl = useEl('useCodes', 0);
-            if (allCodes.length > 0 && codesEl) {
-                codesEl.value = allCodes.join('\n');
-                useSmartDetectDebouncedN(0);
+
+            // 根據記錄的模式載入
+            const modeEl = useEl('useMode', 0);
+            const savedMode = problem.useMode || (info.useMode) || 'range';
+            const startVal = problem.originalCodeStart || problem.codeStart || info.start || '';
+            const endVal = problem.originalCodeEnd || problem.codeEnd || info.end || '';
+            
+            if (savedMode === 'list' && allCodes.length > 0) {
+                modeEl.value = 'list';
+                toggleUseModeN(0, 'list');
+                const codesEl = useEl('useCodes', 0);
+                if (codesEl) {
+                    codesEl.value = (problem.originalCodes && problem.originalCodes.length > 0) ? 
+                                    problem.originalCodes.join('\n') : allCodes.join('\n');
+                    useSmartDetectListDebouncedN(0);
+                }
             } else {
+                // 預設範圍模式或回退
+                modeEl.value = 'range';
+                toggleUseModeN(0, 'range');
                 const startEl = useEl('useStart', 0);
                 const endEl = useEl('useEnd', 0);
-                if (startEl) startEl.value = info.start || '';
-                if (endEl) endEl.value = info.end || '';
-                if (startEl && startEl.value) { useSmartDetectDebouncedN(0); useUpdateRangeCountN(0); }
+                if (startEl) startEl.value = startVal;
+                if (endEl) endEl.value = endVal;
+                useSmartDetectDebouncedN(0);
+                useUpdateRangeCountN(0);
             }
             if (info.channel) {
                 const channelRadio = document.querySelector(`input[name="useChannel"][value="${info.channel}"]`);
@@ -2909,6 +3002,9 @@
     function markProblemItemDone() {
         if (currentProblemItem) {
             const p = currentProblemItem.problem;
+            // 立即從問題清單移除
+            processingStatuses.problem = processingStatuses.problem.filter(item => item.id !== p.id);
+            // 先把項目放回 processing 清單讓 updateProcessingStatus 能找到它
             processingStatuses.processing.push(p);
             updateProcessingStatus(p.id, 'solved', p.startTime, p.errorMsg || '');
             showToast('已標記為已處理');
@@ -2917,11 +3013,15 @@
         document.getElementById('problemItemBanner').style.display = 'none';
         document.getElementById('problemItemInfo').textContent = '';
         resetUseForm();
+        updateStatusDisplay();
     }
 
     function clearProblemItemBanner() {
         if (currentProblemItem) {
             const p = currentProblemItem.problem;
+            // 立即從問題清單移除
+            processingStatuses.problem = processingStatuses.problem.filter(item => item.id !== p.id);
+            // 先把項目放回 processing 清單讓 updateProcessingStatus 能找到它
             processingStatuses.processing.push(p);
             updateProcessingStatus(p.id, 'solved', p.startTime, p.errorMsg || '');
         }
@@ -2929,14 +3029,22 @@
         document.getElementById('problemItemBanner').style.display = 'none';
         document.getElementById('problemItemInfo').textContent = '';
         resetUseForm();
+        updateStatusDisplay();
     }
 
     function clearAllProblems() {
         if (processingStatuses.problem.length === 0) return;
         if (!confirm(`確定要清除所有 ${processingStatuses.problem.length} 個問題任務嗎？`)) return;
+        
+        const problems = [...processingStatuses.problem];
+        problems.forEach(p => {
+            processingStatuses.processing.push(p);
+            updateProcessingStatus(p.id, 'solved', p.startTime, p.errorMsg || '');
+        });
+        
         processingStatuses.problem = [];
         updateStatusDisplay();
-        showToast('已清除所有問題任務');
+        showToast('已將所有問題任務標記為已解決');
     }
 
     function retryTask(id) {
@@ -3118,31 +3226,49 @@
     setInterval(() => {
         if (processingStatuses.processing.length > 0) {
             // 超過 5 分鐘未完成的任務自動標記為「有問題」
-            const timedOut = processingStatuses.processing.filter(p => (new Date() - p.startTime) / 1000 > 300);
-            timedOut.forEach(item => {
-                processingStatuses.processing = processingStatuses.processing.filter(p => p.id !== item.id);
-                const duration = ((new Date() - item.startTime) / 1000).toFixed(1);
-                processingStatuses.problem.unshift({
-                    id: item.id,
-                    orderNo: item.orderNo,
-                    count: item.count,
-                    supplier: item.supplier,
-                    gift: item.gift,
-                    startTime: item.startTime,
-                    duration: duration,
-                    errorMsg: '處理逾時（超過 5 分鐘未回應，可能已失敗）',
-	                    status: 'problem',
-	                    codeStart: item.codeStart || '',
-	                    codeEnd: item.codeEnd || '',
-	                    originalCodeStart: item.originalCodeStart || '',
-	                    originalCodeEnd: item.originalCodeEnd || '',
-	                    originalCodes: item.originalCodes || [],
-                    retryPayload: item.retryPayload || null
+            const now = new Date();
+            const timedOut = processingStatuses.processing.filter(p => (now - p.startTime) / 1000 > 300);
+            if (timedOut.length > 0) {
+                timedOut.forEach(item => {
+                    processingStatuses.processing = processingStatuses.processing.filter(p => p.id !== item.id);
+                    const duration = ((now - item.startTime) / 1000).toFixed(1);
+                    const problemItem = {
+                        ...item,
+                        status: 'problem',
+                        duration: duration,
+                        errorMsg: '處理逾時（超過 5 分鐘未回應，可能已失敗）'
+                    };
+                    processingStatuses.problem.unshift(problemItem);
+                    
+                    // 同步逾時狀態到後端
+                    logTaskToSheet({
+                        taskId: item.id,
+                        status: '有問題',
+                        finishTime: now,
+                        elapsedSec: duration,
+                        errorMsg: '處理逾時',
+                        taskType: item.supplier === '啟用作業' ? '啟用' : (item.orderNo.startsWith('入庫') ? '入庫' : '出庫'),
+                        description: item.orderNo,
+                        detail: item.supplier + ' - ' + item.gift,
+                        count: item.count,
+                        user: item.user,
+                        startTime: item.startTime,
+                        codeStart: item.codeStart,
+                        codeEnd: item.codeEnd,
+                        originalCodeStart: item.originalCodeStart,
+                        originalCodeEnd: item.originalCodeEnd,
+                        sourceType: item.sourceType,
+                        allCodes: item.allCodes,
+                        originalCodes: item.originalCodes || [],
+                        useMode: item.useMode || 'range'
+                    });
                 });
-            });
-            updateStatusDisplay();
+                updateStatusDisplay();
+                // 釋放名額後，嘗試啟動排隊中的任務
+                processQueue();
+            }
         }
-    }, 1000);
+    }, 5000); // 每 5 秒檢查一次即可
 
     function getReportYearOptions() {
         const now = new Date();
@@ -3794,7 +3920,7 @@
         const processId = generateProcessId();
         const startTime = new Date();
         const retSupPayload = { mode: 'returnToSupplier', codes: lines, reason: reason, user: currentUser };
-        addProcessingStatus(processId, '退回商戶' + (reason ? '-' + reason : ''), lines.length, '', '', startTime, lines[0], lines[lines.length - 1], retSupPayload, 'returnToSupplier', lines);
+        addProcessingStatus(processId, '退回商戶' + (reason ? '-' + reason : ''), lines.length, '退回商戶', reason || '批量退回', startTime, lines[0], lines[lines.length - 1], retSupPayload, 'returnToSupplier', lines);
 
         // 清空表單讓用戶繼續操作
         document.getElementById('retSupCodes').value = '';
@@ -5110,4 +5236,959 @@
             hideLoading();
         }
     }
-</script></body></html>
+
+    function downloadInboundTool() {
+        const toolSource = document.getElementById("inboundToolSource").value;
+        const blob = new Blob([toolSource], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "batch_inbound_tool.html";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+<textarea id="inboundToolSource" style="display:none;"><!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模擬入庫工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f7; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; color: #1d1d1f; margin-bottom: 20px; font-size: 24px; }
+        .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h3 { margin-bottom: 12px; color: #333; font-size: 16px; }
+        .form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; flex: 1; min-width: 120px; }
+        .form-group label { font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 600; }
+        .form-group input, .form-group select { padding: 8px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #0071e3; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #0071e3; color: #fff; }
+        .btn-primary:hover { background: #0077ed; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-success { background: #34c759; color: #fff; }
+        .btn-success:hover { background: #30b350; }
+        .btn-success:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-danger { background: #ff3b30; color: #fff; }
+        .btn-small { font-size: 12px; padding: 6px 12px; }
+        .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; max-height: 400px; overflow-y: auto; display: block; }
+        .preview-table thead { position: sticky; top: 0; }
+        .preview-table th, .preview-table td { padding: 6px 10px; border: 1px solid #e5e5e5; text-align: left; }
+        .preview-table th { background: #f3f3f3; font-weight: 600; }
+        .preview-table tr:nth-child(even) { background: #fafafa; }
+        .status-bar { padding: 12px 16px; border-radius: 8px; margin-top: 12px; font-size: 13px; display: none; }
+        .status-bar.info { background: #e3f2fd; color: #1565c0; display: block; }
+        .status-bar.success { background: #e8f5e9; color: #2e7d32; display: block; }
+        .status-bar.error { background: #fce4ec; color: #c62828; display: block; }
+        .summary { font-size: 14px; color: #333; margin: 12px 0; }
+        .summary strong { color: #0071e3; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .checkbox-row input[type="checkbox"] { width: 18px; height: 18px; }
+        .api-config { font-size: 12px; color: #666; margin-bottom: 8px; }
+        .api-config input { width: 100%; padding: 6px 10px; border: 1px solid #d2d2d7; border-radius: 6px; font-size: 12px; margin-top: 4px; }
+        .queue-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .queue-item:last-child { border-bottom: none; }
+        .badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .badge-pending { background: #ffeaa7; color: #856404; }
+        .badge-synced { background: #d4edda; color: #155724; }
+        .badge-error { background: #f8d7da; color: #721c24; }
+        .rpt-select select { width: auto; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>模擬入庫工具</h1>
+        
+        <!-- API 設定 -->
+        <div class="card">
+            <div class="api-config">
+                <label>API URL：</label>
+                <input type="text" id="apiUrl" placeholder="https://script.google.com/macros/s/.../exec" />
+            </div>
+        </div>
+
+        <!-- 入庫表單 -->
+        <div class="card">
+            <h3>填寫入庫資料</h3>
+            <div id="configLoadingMsg" style="color:#666; font-size:13px; margin-bottom:12px;">載入供應商清單中...</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>供應商 (必選)</label>
+                    <select id="supplier" onchange="onSupplierChange()">
+                        <option value="">-- 請選擇供應商 --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>禮券項目 (必選)</label>
+                    <select id="giftName">
+                        <option value="">-- 請先選擇供應商 --</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>首碼 (必填)</label>
+                    <input type="text" id="startCode" placeholder="例：1 或 LBD001">
+                </div>
+                <div class="form-group">
+                    <label>尾碼 (必填)</label>
+                    <input type="text" id="endCode" placeholder="例：8000 或 LBD999">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group rpt-select">
+                    <label>Report 月份</label>
+                    <div>
+                        <select id="rptYear"></select>
+                        <select id="rptMonth"></select>
+                    </div>
+                </div>
+            </div>
+            <div class="checkbox-row">
+                <input type="checkbox" id="activated">
+                <label for="activated">已啟動</label>
+            </div>
+            <button class="btn btn-primary" onclick="generatePreview()">生成預覽</button>
+        </div>
+
+        <!-- 預覽區域 -->
+        <div class="card" id="previewCard" style="display:none;">
+            <h3>模擬入庫預覽</h3>
+            <div class="summary" id="previewSummary"></div>
+            <table class="preview-table" id="previewTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>批次</th>
+                        <th>供應商</th>
+                        <th>禮券項目</th>
+                        <th>代碼</th>
+                        <th>啟動狀態</th>
+                        <th>使用狀態</th>
+                        <th>Report月份</th>
+                    </tr>
+                </thead>
+                <tbody id="previewBody"></tbody>
+            </table>
+            <div style="margin-top: 16px; display: flex; gap: 12px;">
+                <button class="btn btn-success" id="syncBtn" onclick="syncToSystem()">同步到系統</button>
+                <button class="btn btn-danger btn-small" onclick="clearPreview()">清除</button>
+            </div>
+            <div class="status-bar" id="statusBar"></div>
+        </div>
+
+        <!-- 歷史記錄 -->
+        <div class="card">
+            <h3>同步歷史</h3>
+            <div id="historyList" style="font-size: 13px; color: #666;">尚無記錄</div>
+        </div>
+    </div>
+
+    <script>
+    // ===== 初始化 =====
+    let generatedCodes = [];
+    let syncHistory = [];
+    let configData = []; // Config 表資料: [{supplier, name, rule1, rule2, calcType, isEGift}]
+
+    window.addEventListener('DOMContentLoaded', function() {
+        // 載入 API URL
+        const savedUrl = localStorage.getItem('batchInbound_apiUrl');
+        if (savedUrl) document.getElementById('apiUrl').value = savedUrl;
+        document.getElementById('apiUrl').addEventListener('change', function() {
+            localStorage.setItem('batchInbound_apiUrl', this.value.trim());
+            loadConfig(); // URL 變更後重新載入 Config
+        });
+
+        // 從 URL 參數帶入 API
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('api')) {
+            document.getElementById('apiUrl').value = urlParams.get('api');
+            localStorage.setItem('batchInbound_apiUrl', urlParams.get('api'));
+        }
+        if (urlParams.get('activated') === '1' || urlParams.get('activated') === 'true') document.getElementById('activated').checked = true;
+
+        // 初始化 Report 月份下拉
+        initReportMonth();
+
+        // 載入 Config（供應商+項目清單）
+        loadConfig();
+
+        // 載入歷史
+        const saved = localStorage.getItem('batchInbound_history');
+        if (saved) syncHistory = JSON.parse(saved);
+        renderHistory();
+    });
+
+    // ===== 載入 Config 表 =====
+    async function loadConfig() {
+        const url = getApiUrl();
+        const loadingMsg = document.getElementById('configLoadingMsg');
+        if (!url) {
+            loadingMsg.textContent = '請先設定 API URL';
+            loadingMsg.style.color = '#e67e00';
+            return;
+        }
+        loadingMsg.textContent = '載入供應商清單中...';
+        loadingMsg.style.color = '#666';
+        try {
+            const res = await fetch(`${url}?action=getConfig`, { redirect: 'follow' });
+            const data = await res.json();
+            configData = data.filter(item => !item.isEGift); // 排除電子禮券
+            populateSupplierDropdown();
+            loadingMsg.textContent = `已載入 ${configData.length} 個項目`;
+            loadingMsg.style.color = '#34c759';
+            setTimeout(() => { loadingMsg.style.display = 'none'; }, 2000);
+        } catch (e) {
+            loadingMsg.textContent = `載入失敗: ${e.message}（請檢查 API URL）`;
+            loadingMsg.style.color = '#ff3b30';
+        }
+    }
+
+    function populateSupplierDropdown() {
+        const supplierSel = document.getElementById('supplier');
+        // 取得不重複的供應商清單
+        const suppliers = [...new Set(configData.map(c => c.supplier))];
+        supplierSel.innerHTML = '<option value="">-- 請選擇供應商 --</option>';
+        suppliers.forEach(s => {
+            supplierSel.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+        // 如果 URL 有指定 supplier，自動選中
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('supplier')) {
+            supplierSel.value = urlParams.get('supplier');
+            onSupplierChange();
+            // 如果 URL 有指定 gift，自動選中
+            if (urlParams.get('gift')) {
+                document.getElementById('giftName').value = urlParams.get('gift');
+            }
+        }
+    }
+
+    function onSupplierChange() {
+        const supplier = document.getElementById('supplier').value;
+        const giftSel = document.getElementById('giftName');
+        if (!supplier) {
+            giftSel.innerHTML = '<option value="">-- 請先選擇供應商 --</option>';
+            return;
+        }
+        const items = configData.filter(c => c.supplier === supplier);
+        giftSel.innerHTML = '<option value="">-- 請選擇項目 --</option>';
+        items.forEach(item => {
+            giftSel.innerHTML += `<option value="${item.name}">${item.name}</option>`;
+        });
+        // 如果只有一個項目，自動選中
+        if (items.length === 1) giftSel.value = items[0].name;
+    }
+
+    function initReportMonth() {
+        const yearSel = document.getElementById('rptYear');
+        const monthSel = document.getElementById('rptMonth');
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        yearSel.innerHTML = '<option value="">年份</option>';
+        for (let y = currentYear - 1; y <= currentYear + 1; y++) {
+            yearSel.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`;
+        }
+        monthSel.innerHTML = '<option value="">月份</option>';
+        for (let m = 1; m <= 12; m++) {
+            monthSel.innerHTML += `<option value="${String(m).padStart(2,'0')}">${m}月</option>`;
+        }
+        // 預設 25 日規則
+        const day = now.getDate();
+        const defMonth = day >= 26 ? now.getMonth() + 2 : now.getMonth() + 1;
+        const defYear = defMonth > 12 ? currentYear + 1 : currentYear;
+        const defM = defMonth > 12 ? defMonth - 12 : defMonth;
+        yearSel.value = defYear;
+        monthSel.value = String(defM).padStart(2, '0');
+    }
+
+    function getApiUrl() {
+        return document.getElementById('apiUrl').value.trim();
+    }
+
+    function getReportMonth() {
+        const y = document.getElementById('rptYear').value;
+        const m = document.getElementById('rptMonth').value;
+        if (y && m) return `${y}-${m}`;
+        return '';
+    }
+
+    // ===== 展開代碼 =====
+    function expandCodes(start, end) {
+        start = start.trim();
+        end = end.trim();
+        const prefix = start.replace(/\d+$/, '');
+        const startNum = parseInt(start.replace(/\D/g, '')) || 0;
+        const endNum = parseInt(end.replace(/\D/g, '')) || 0;
+        const numLen = (start.match(/\d+$/) || [''])[0].length;
+
+        // 處理首尾反轉
+        const realStart = Math.min(startNum, endNum);
+        const realEnd = Math.max(startNum, endNum);
+
+        const codes = [];
+        for (let i = realStart; i <= realEnd; i++) {
+            codes.push(prefix + String(i).padStart(numLen, '0'));
+        }
+        return codes;
+    }
+
+    // ===== 生成預覽 =====
+    function generatePreview() {
+        const supplier = document.getElementById('supplier').value.trim();
+        const giftName = document.getElementById('giftName').value.trim();
+        const startCode = document.getElementById('startCode').value.trim();
+        const endCode = document.getElementById('endCode').value.trim();
+        const activated = document.getElementById('activated').checked;
+        const reportMonth = getReportMonth();
+
+        if (!supplier) { alert('請填寫供應商'); return; }
+        if (!giftName) { alert('請填寫禮券項目'); return; }
+        if (!startCode) { alert('請填寫首碼'); return; }
+        if (!endCode) { alert('請填寫尾碼'); return; }
+
+        generatedCodes = expandCodes(startCode, endCode);
+
+        if (generatedCodes.length === 0) { alert('無法展開代碼，請檢查首尾碼'); return; }
+        if (generatedCodes.length > 50000) { alert(`代碼數量過多 (${generatedCodes.length})，最多支援 50000`); return; }
+
+        // 顯示預覽
+        const previewCard = document.getElementById('previewCard');
+        previewCard.style.display = 'block';
+
+        const activationText = activated ? '已啟動' : '未啟動';
+        document.getElementById('previewSummary').innerHTML = `
+            供應商: <strong>${supplier}</strong> | 
+            項目: <strong>${giftName}</strong> | 
+            數量: <strong style="color:red; font-size:18px;">${generatedCodes.length}</strong> 張 | 
+            啟動狀態: <strong>${activationText}</strong> | 
+            Report月份: <strong>${reportMonth || '未設定'}</strong>
+        `;
+
+        // 只顯示前 100 行 + 最後 5 行（避免太多 DOM）
+        const tbody = document.getElementById('previewBody');
+        let html = '';
+        const showLimit = 100;
+        const showCodes = generatedCodes.length <= showLimit + 5 ? generatedCodes : 
+            [...generatedCodes.slice(0, showLimit), null, ...generatedCodes.slice(-5)];
+
+        let idx = 0;
+        for (const code of showCodes) {
+            if (code === null) {
+                html += `<tr style="background:#fff3cd;"><td colspan="8" style="text-align:center; font-style:italic;">... 省略 ${generatedCodes.length - showLimit - 5} 行 ...</td></tr>`;
+            } else {
+                idx++;
+                const realIdx = code === generatedCodes[generatedCodes.length - 5] ? generatedCodes.length - 4 : 
+                               code === generatedCodes[generatedCodes.length - 4] ? generatedCodes.length - 3 :
+                               code === generatedCodes[generatedCodes.length - 3] ? generatedCodes.length - 2 :
+                               code === generatedCodes[generatedCodes.length - 2] ? generatedCodes.length - 1 :
+                               code === generatedCodes[generatedCodes.length - 1] ? generatedCodes.length : idx;
+                html += `<tr>
+                    <td>${realIdx}</td>
+                    <td>-</td>
+                    <td>${supplier}</td>
+                    <td>${giftName}</td>
+                    <td><code>${code}</code></td>
+                    <td>${activationText}</td>
+                    <td>未使用</td>
+                    <td>${reportMonth}</td>
+                </tr>`;
+            }
+        }
+        tbody.innerHTML = html;
+
+        // 清除狀態
+        const statusBar = document.getElementById('statusBar');
+        statusBar.className = 'status-bar';
+        statusBar.style.display = 'none';
+
+        // 滾動到預覽
+        previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ===== 同步到系統 =====
+    async function syncToSystem() {
+        const url = getApiUrl();
+        if (!url) { alert('請先設定 API URL'); return; }
+        if (generatedCodes.length === 0) { alert('請先生成預覽'); return; }
+
+        const supplier = document.getElementById('supplier').value.trim();
+        const giftName = document.getElementById('giftName').value.trim();
+        const activated = document.getElementById('activated').checked;
+        const reportMonth = getReportMonth();
+
+        const syncBtn = document.getElementById('syncBtn');
+        const statusBar = document.getElementById('statusBar');
+        syncBtn.disabled = true;
+        syncBtn.textContent = '同步中...';
+        statusBar.className = 'status-bar info';
+        statusBar.textContent = `正在寫入 ${generatedCodes.length} 個代碼到系統... (批量寫入，預計 5-15 秒)`;
+        statusBar.style.display = 'block';
+
+        const startTime = Date.now();
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({
+                    mode: 'batchRegister',
+                    batch: '',
+                    supplier: supplier,
+                    gift: giftName,
+                    activated: activated,
+                    reportMonth: reportMonth,
+                    user: '模擬入庫',
+                    codes: generatedCodes
+                }),
+                signal: AbortSignal.timeout(300000) // 5 分鐘超時
+            });
+            const data = await res.json();
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            if (data.result === 'success') {
+                statusBar.className = 'status-bar success';
+                statusBar.textContent = `✅ 入庫成功！已寫入 ${data.count} 個代碼 (耗時 ${elapsed} 秒)`;
+                
+                // 記錄歷史
+                syncHistory.unshift({
+                    time: new Date().toLocaleString('zh-TW'),
+                    supplier: supplier,
+                    gift: giftName,
+                    count: data.count,
+                    elapsed: elapsed,
+                    reportMonth: reportMonth,
+                    codeStart: startCode,
+                    codeEnd: endCode
+                });
+                if (syncHistory.length > 20) syncHistory = syncHistory.slice(0, 20);
+                localStorage.setItem('batchInbound_history', JSON.stringify(syncHistory));
+                renderHistory();
+
+                // 清空表單
+                document.getElementById('startCode').value = '';
+                document.getElementById('endCode').value = '';
+                generatedCodes = [];
+            } else {
+                statusBar.className = 'status-bar error';
+                statusBar.textContent = `❌ 寫入失敗: ${data.message || '未知錯誤'} (耗時 ${elapsed} 秒)`;
+            }
+        } catch (e) {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            statusBar.className = 'status-bar error';
+            statusBar.textContent = `❌ 同步失敗: ${e.message || '網路錯誤'} (耗時 ${elapsed} 秒)`;
+        }
+
+        syncBtn.disabled = false;
+        syncBtn.textContent = '同步到系統';
+    }
+
+    // ===== 清除預覽 =====
+    function clearPreview() {
+        document.getElementById('previewCard').style.display = 'none';
+        document.getElementById('previewBody').innerHTML = '';
+        generatedCodes = [];
+    }
+
+    // ===== 歷史記錄 =====
+    function renderHistory() {
+        const list = document.getElementById('historyList');
+        if (syncHistory.length === 0) {
+            list.innerHTML = '尚無記錄';
+            return;
+        }
+        list.innerHTML = syncHistory.map(h => `
+            <div class="queue-item">
+                <div>
+                    <strong>${h.supplier} - ${h.gift}</strong> (${h.count} 張)
+                    ${h.reportMonth ? `[${h.reportMonth}]` : ''}
+                    ${(h.codeStart && h.codeEnd) ? `<br><span style="color:#666;">代碼: ${h.codeStart} ~ ${h.codeEnd}</span>` : ''}
+                    <br><span style="font-size:11px; color:#999;">${h.time} | 耗時 ${h.elapsed}s</span>
+                </div>
+                <span class="badge badge-synced">已完成</span>
+            </div>
+        `).join('');
+    }
+    </script>
+<textarea id="inboundToolSource" style="display:none;"><!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模擬入庫工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f7; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; color: #1d1d1f; margin-bottom: 20px; font-size: 24px; }
+        .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h3 { margin-bottom: 12px; color: #333; font-size: 16px; }
+        .form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; flex: 1; min-width: 120px; }
+        .form-group label { font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 600; }
+        .form-group input, .form-group select { padding: 8px 12px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #0071e3; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #0071e3; color: #fff; }
+        .btn-primary:hover { background: #0077ed; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-success { background: #34c759; color: #fff; }
+        .btn-success:hover { background: #30b350; }
+        .btn-success:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-danger { background: #ff3b30; color: #fff; }
+        .btn-small { font-size: 12px; padding: 6px 12px; }
+        .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; max-height: 400px; overflow-y: auto; display: block; }
+        .preview-table thead { position: sticky; top: 0; }
+        .preview-table th, .preview-table td { padding: 6px 10px; border: 1px solid #e5e5e5; text-align: left; }
+        .preview-table th { background: #f3f3f3; font-weight: 600; }
+        .preview-table tr:nth-child(even) { background: #fafafa; }
+        .status-bar { padding: 12px 16px; border-radius: 8px; margin-top: 12px; font-size: 13px; display: none; }
+        .status-bar.info { background: #e3f2fd; color: #1565c0; display: block; }
+        .status-bar.success { background: #e8f5e9; color: #2e7d32; display: block; }
+        .status-bar.error { background: #fce4ec; color: #c62828; display: block; }
+        .summary { font-size: 14px; color: #333; margin: 12px 0; }
+        .summary strong { color: #0071e3; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .checkbox-row input[type="checkbox"] { width: 18px; height: 18px; }
+        .api-config { font-size: 12px; color: #666; margin-bottom: 8px; }
+        .api-config input { width: 100%; padding: 6px 10px; border: 1px solid #d2d2d7; border-radius: 6px; font-size: 12px; margin-top: 4px; }
+        .queue-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .queue-item:last-child { border-bottom: none; }
+        .badge { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .badge-pending { background: #ffeaa7; color: #856404; }
+        .badge-synced { background: #d4edda; color: #155724; }
+        .badge-error { background: #f8d7da; color: #721c24; }
+        .rpt-select select { width: auto; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>模擬入庫工具</h1>
+        
+        <!-- API 設定 -->
+        <div class="card">
+            <div class="api-config">
+                <label>API URL：</label>
+                <input type="text" id="apiUrl" placeholder="https://script.google.com/macros/s/.../exec" />
+            </div>
+        </div>
+
+        <!-- 入庫表單 -->
+        <div class="card">
+            <h3>填寫入庫資料</h3>
+            <div id="configLoadingMsg" style="color:#666; font-size:13px; margin-bottom:12px;">載入供應商清單中...</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>供應商 (必選)</label>
+                    <select id="supplier" onchange="onSupplierChange()">
+                        <option value="">-- 請選擇供應商 --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>禮券項目 (必選)</label>
+                    <select id="giftName">
+                        <option value="">-- 請先選擇供應商 --</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>首碼 (必填)</label>
+                    <input type="text" id="startCode" placeholder="例：1 或 LBD001">
+                </div>
+                <div class="form-group">
+                    <label>尾碼 (必填)</label>
+                    <input type="text" id="endCode" placeholder="例：8000 或 LBD999">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group rpt-select">
+                    <label>Report 月份</label>
+                    <div>
+                        <select id="rptYear"></select>
+                        <select id="rptMonth"></select>
+                    </div>
+                </div>
+            </div>
+            <div class="checkbox-row">
+                <input type="checkbox" id="activated">
+                <label for="activated">已啟動</label>
+            </div>
+            <button class="btn btn-primary" onclick="generatePreview()">生成預覽</button>
+        </div>
+
+        <!-- 預覽區域 -->
+        <div class="card" id="previewCard" style="display:none;">
+            <h3>模擬入庫預覽</h3>
+            <div class="summary" id="previewSummary"></div>
+            <table class="preview-table" id="previewTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>批次</th>
+                        <th>供應商</th>
+                        <th>禮券項目</th>
+                        <th>代碼</th>
+                        <th>啟動狀態</th>
+                        <th>使用狀態</th>
+                        <th>Report月份</th>
+                    </tr>
+                </thead>
+                <tbody id="previewBody"></tbody>
+            </table>
+            <div style="margin-top: 16px; display: flex; gap: 12px;">
+                <button class="btn btn-success" id="syncBtn" onclick="syncToSystem()">同步到系統</button>
+                <button class="btn btn-danger btn-small" onclick="clearPreview()">清除</button>
+            </div>
+            <div class="status-bar" id="statusBar"></div>
+        </div>
+
+        <!-- 歷史記錄 -->
+        <div class="card">
+            <h3>同步歷史</h3>
+            <div id="historyList" style="font-size: 13px; color: #666;">尚無記錄</div>
+        </div>
+    </div>
+
+    <script>
+    // ===== 初始化 =====
+    let generatedCodes = [];
+    let syncHistory = [];
+    let configData = []; // Config 表資料: [{supplier, name, rule1, rule2, calcType, isEGift}]
+
+    window.addEventListener('DOMContentLoaded', function() {
+        // 載入 API URL
+        const savedUrl = localStorage.getItem('batchInbound_apiUrl');
+        if (savedUrl) document.getElementById('apiUrl').value = savedUrl;
+        document.getElementById('apiUrl').addEventListener('change', function() {
+            localStorage.setItem('batchInbound_apiUrl', this.value.trim());
+            loadConfig(); // URL 變更後重新載入 Config
+        });
+
+        // 從 URL 參數帶入 API
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('api')) {
+            document.getElementById('apiUrl').value = urlParams.get('api');
+            localStorage.setItem('batchInbound_apiUrl', urlParams.get('api'));
+        }
+        if (urlParams.get('activated') === '1' || urlParams.get('activated') === 'true') document.getElementById('activated').checked = true;
+
+        // 初始化 Report 月份下拉
+        initReportMonth();
+
+        // 載入 Config（供應商+項目清單）
+        loadConfig();
+
+        // 載入歷史
+        const saved = localStorage.getItem('batchInbound_history');
+        if (saved) syncHistory = JSON.parse(saved);
+        renderHistory();
+    });
+
+    // ===== 載入 Config 表 =====
+    async function loadConfig() {
+        const url = getApiUrl();
+        const loadingMsg = document.getElementById('configLoadingMsg');
+        if (!url) {
+            loadingMsg.textContent = '請先設定 API URL';
+            loadingMsg.style.color = '#e67e00';
+            return;
+        }
+        loadingMsg.textContent = '載入供應商清單中...';
+        loadingMsg.style.color = '#666';
+        try {
+            const res = await fetch(`${url}?action=getConfig`, { redirect: 'follow' });
+            const data = await res.json();
+            configData = data.filter(item => !item.isEGift); // 排除電子禮券
+            populateSupplierDropdown();
+            loadingMsg.textContent = `已載入 ${configData.length} 個項目`;
+            loadingMsg.style.color = '#34c759';
+            setTimeout(() => { loadingMsg.style.display = 'none'; }, 2000);
+        } catch (e) {
+            loadingMsg.textContent = `載入失敗: ${e.message}（請檢查 API URL）`;
+            loadingMsg.style.color = '#ff3b30';
+        }
+    }
+
+    function populateSupplierDropdown() {
+        const supplierSel = document.getElementById('supplier');
+        // 取得不重複的供應商清單
+        const suppliers = [...new Set(configData.map(c => c.supplier))];
+        supplierSel.innerHTML = '<option value="">-- 請選擇供應商 --</option>';
+        suppliers.forEach(s => {
+            supplierSel.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+        // 如果 URL 有指定 supplier，自動選中
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('supplier')) {
+            supplierSel.value = urlParams.get('supplier');
+            onSupplierChange();
+            // 如果 URL 有指定 gift，自動選中
+            if (urlParams.get('gift')) {
+                document.getElementById('giftName').value = urlParams.get('gift');
+            }
+        }
+    }
+
+    function onSupplierChange() {
+        const supplier = document.getElementById('supplier').value;
+        const giftSel = document.getElementById('giftName');
+        if (!supplier) {
+            giftSel.innerHTML = '<option value="">-- 請先選擇供應商 --</option>';
+            return;
+        }
+        const items = configData.filter(c => c.supplier === supplier);
+        giftSel.innerHTML = '<option value="">-- 請選擇項目 --</option>';
+        items.forEach(item => {
+            giftSel.innerHTML += `<option value="${item.name}">${item.name}</option>`;
+        });
+        // 如果只有一個項目，自動選中
+        if (items.length === 1) giftSel.value = items[0].name;
+    }
+
+    function initReportMonth() {
+        const yearSel = document.getElementById('rptYear');
+        const monthSel = document.getElementById('rptMonth');
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        yearSel.innerHTML = '<option value="">年份</option>';
+        for (let y = currentYear - 1; y <= currentYear + 1; y++) {
+            yearSel.innerHTML += `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`;
+        }
+        monthSel.innerHTML = '<option value="">月份</option>';
+        for (let m = 1; m <= 12; m++) {
+            monthSel.innerHTML += `<option value="${String(m).padStart(2,'0')}">${m}月</option>`;
+        }
+        // 預設 25 日規則
+        const day = now.getDate();
+        const defMonth = day >= 26 ? now.getMonth() + 2 : now.getMonth() + 1;
+        const defYear = defMonth > 12 ? currentYear + 1 : currentYear;
+        const defM = defMonth > 12 ? defMonth - 12 : defMonth;
+        yearSel.value = defYear;
+        monthSel.value = String(defM).padStart(2, '0');
+    }
+
+    function getApiUrl() {
+        return document.getElementById('apiUrl').value.trim();
+    }
+
+    function getReportMonth() {
+        const y = document.getElementById('rptYear').value;
+        const m = document.getElementById('rptMonth').value;
+        if (y && m) return `${y}-${m}`;
+        return '';
+    }
+
+    // ===== 展開代碼 =====
+    function expandCodes(start, end) {
+        start = start.trim();
+        end = end.trim();
+        const prefix = start.replace(/\d+$/, '');
+        const startNum = parseInt(start.replace(/\D/g, '')) || 0;
+        const endNum = parseInt(end.replace(/\D/g, '')) || 0;
+        const numLen = (start.match(/\d+$/) || [''])[0].length;
+
+        // 處理首尾反轉
+        const realStart = Math.min(startNum, endNum);
+        const realEnd = Math.max(startNum, endNum);
+
+        const codes = [];
+        for (let i = realStart; i <= realEnd; i++) {
+            codes.push(prefix + String(i).padStart(numLen, '0'));
+        }
+        return codes;
+    }
+
+    // ===== 生成預覽 =====
+    function generatePreview() {
+        const supplier = document.getElementById('supplier').value.trim();
+        const giftName = document.getElementById('giftName').value.trim();
+        const startCode = document.getElementById('startCode').value.trim();
+        const endCode = document.getElementById('endCode').value.trim();
+        const activated = document.getElementById('activated').checked;
+        const reportMonth = getReportMonth();
+
+        if (!supplier) { alert('請填寫供應商'); return; }
+        if (!giftName) { alert('請填寫禮券項目'); return; }
+        if (!startCode) { alert('請填寫首碼'); return; }
+        if (!endCode) { alert('請填寫尾碼'); return; }
+
+        generatedCodes = expandCodes(startCode, endCode);
+
+        if (generatedCodes.length === 0) { alert('無法展開代碼，請檢查首尾碼'); return; }
+        if (generatedCodes.length > 50000) { alert(`代碼數量過多 (${generatedCodes.length})，最多支援 50000`); return; }
+
+        // 顯示預覽
+        const previewCard = document.getElementById('previewCard');
+        previewCard.style.display = 'block';
+
+        const activationText = activated ? '已啟動' : '未啟動';
+        document.getElementById('previewSummary').innerHTML = `
+            供應商: <strong>${supplier}</strong> | 
+            項目: <strong>${giftName}</strong> | 
+            數量: <strong style="color:red; font-size:18px;">${generatedCodes.length}</strong> 張 | 
+            啟動狀態: <strong>${activationText}</strong> | 
+            Report月份: <strong>${reportMonth || '未設定'}</strong>
+        `;
+
+        // 只顯示前 100 行 + 最後 5 行（避免太多 DOM）
+        const tbody = document.getElementById('previewBody');
+        let html = '';
+        const showLimit = 100;
+        const showCodes = generatedCodes.length <= showLimit + 5 ? generatedCodes : 
+            [...generatedCodes.slice(0, showLimit), null, ...generatedCodes.slice(-5)];
+
+        let idx = 0;
+        for (const code of showCodes) {
+            if (code === null) {
+                html += `<tr style="background:#fff3cd;"><td colspan="8" style="text-align:center; font-style:italic;">... 省略 ${generatedCodes.length - showLimit - 5} 行 ...</td></tr>`;
+            } else {
+                idx++;
+                const realIdx = code === generatedCodes[generatedCodes.length - 5] ? generatedCodes.length - 4 : 
+                               code === generatedCodes[generatedCodes.length - 4] ? generatedCodes.length - 3 :
+                               code === generatedCodes[generatedCodes.length - 3] ? generatedCodes.length - 2 :
+                               code === generatedCodes[generatedCodes.length - 2] ? generatedCodes.length - 1 :
+                               code === generatedCodes[generatedCodes.length - 1] ? generatedCodes.length : idx;
+                html += `<tr>
+                    <td>${realIdx}</td>
+                    <td>-</td>
+                    <td>${supplier}</td>
+                    <td>${giftName}</td>
+                    <td><code>${code}</code></td>
+                    <td>${activationText}</td>
+                    <td>未使用</td>
+                    <td>${reportMonth}</td>
+                </tr>`;
+            }
+        }
+        tbody.innerHTML = html;
+
+        // 清除狀態
+        const statusBar = document.getElementById('statusBar');
+        statusBar.className = 'status-bar';
+        statusBar.style.display = 'none';
+
+        // 滾動到預覽
+        previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ===== 同步到系統 =====
+    async function syncToSystem() {
+        const url = getApiUrl();
+        if (!url) { alert('請先設定 API URL'); return; }
+        if (generatedCodes.length === 0) { alert('請先生成預覽'); return; }
+
+        const supplier = document.getElementById('supplier').value.trim();
+        const giftName = document.getElementById('giftName').value.trim();
+        const activated = document.getElementById('activated').checked;
+        const reportMonth = getReportMonth();
+
+        const syncBtn = document.getElementById('syncBtn');
+        const statusBar = document.getElementById('statusBar');
+        syncBtn.disabled = true;
+        syncBtn.textContent = '同步中...';
+        statusBar.className = 'status-bar info';
+        statusBar.textContent = `正在寫入 ${generatedCodes.length} 個代碼到系統... (批量寫入，預計 5-15 秒)`;
+        statusBar.style.display = 'block';
+
+        const startTime = Date.now();
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({
+                    mode: 'batchRegister',
+                    batch: '',
+                    supplier: supplier,
+                    gift: giftName,
+                    activated: activated,
+                    reportMonth: reportMonth,
+                    user: '模擬入庫',
+                    codes: generatedCodes
+                }),
+                signal: AbortSignal.timeout(300000) // 5 分鐘超時
+            });
+            const data = await res.json();
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            if (data.result === 'success') {
+                statusBar.className = 'status-bar success';
+                statusBar.textContent = `✅ 入庫成功！已寫入 ${data.count} 個代碼 (耗時 ${elapsed} 秒)`;
+                
+                // 記錄歷史
+                syncHistory.unshift({
+                    time: new Date().toLocaleString('zh-TW'),
+                    supplier: supplier,
+                    gift: giftName,
+                    count: data.count,
+                    elapsed: elapsed,
+                    reportMonth: reportMonth,
+                    codeStart: startCode,
+                    codeEnd: endCode
+                });
+                if (syncHistory.length > 20) syncHistory = syncHistory.slice(0, 20);
+                localStorage.setItem('batchInbound_history', JSON.stringify(syncHistory));
+                renderHistory();
+
+                // 清空表單
+                document.getElementById('startCode').value = '';
+                document.getElementById('endCode').value = '';
+                generatedCodes = [];
+            } else {
+                statusBar.className = 'status-bar error';
+                statusBar.textContent = `❌ 寫入失敗: ${data.message || '未知錯誤'} (耗時 ${elapsed} 秒)`;
+            }
+        } catch (e) {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            statusBar.className = 'status-bar error';
+            statusBar.textContent = `❌ 同步失敗: ${e.message || '網路錯誤'} (耗時 ${elapsed} 秒)`;
+        }
+
+        syncBtn.disabled = false;
+        syncBtn.textContent = '同步到系統';
+    }
+
+    // ===== 清除預覽 =====
+    function clearPreview() {
+        document.getElementById('previewCard').style.display = 'none';
+        document.getElementById('previewBody').innerHTML = '';
+        generatedCodes = [];
+    }
+
+    // ===== 歷史記錄 =====
+    function renderHistory() {
+        const list = document.getElementById('historyList');
+        if (syncHistory.length === 0) {
+            list.innerHTML = '尚無記錄';
+            return;
+        }
+        list.innerHTML = syncHistory.map(h => `
+            <div class="queue-item">
+                <div>
+                    <strong>${h.supplier} - ${h.gift}</strong> (${h.count} 張)
+                    ${h.reportMonth ? `[${h.reportMonth}]` : ''}
+                    ${(h.codeStart && h.codeEnd) ? `<br><span style="color:#666;">代碼: ${h.codeStart} ~ ${h.codeEnd}</span>` : ''}
+                    <br><span style="font-size:11px; color:#999;">${h.time} | 耗時 ${h.elapsed}s</span>
+                </div>
+                <span class="badge badge-synced">已完成</span>
+            </div>
+        `).join('');
+    }
+    </script>
+</body>
+</html>
+</textarea>
+</body>
+</html>
+</textarea>
+
+</body></html>
