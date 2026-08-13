@@ -2302,10 +2302,15 @@
             const alreadyUsed = [];
             for (const c of codes) {
                 const canon = canonCodeLocal(c);
+                // V3.7.6 修正：檢查代碼是否在 localCodeIndex 中，如果不在則為未入庫
                 if (!localCodeIndex[canon]) {
                     notRegistered.push(c);
-                } else if (localUsedSet && localUsedSet.has(canon)) {
-                    alreadyUsed.push(c);
+                } else {
+                    // 如果在 localCodeIndex 中，再檢查 localUsedSet 或 status
+                    const info = localCodeIndex[canon];
+                    if ((localUsedSet && localUsedSet.has(canon)) || info.status === '已使用' || info.status === '已出庫') {
+                        alreadyUsed.push(c);
+                    }
                 }
             }
             if (itemCurrentUseCodes[n] !== codes) return;
@@ -2322,8 +2327,13 @@
             }
             if (pUsageStatus) pUsageStatus.innerHTML = statusHtml;
             if (usageWarning) {
-                if (notRegistered.length > 0) {
-                    usageWarning.innerHTML = `<span style="color:#e67e00;">代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫）</span>`;
+                // 如果有未入庫或已使用的代碼，顯示警告
+                let warningMsg = '';
+                if (notRegistered.length > 0) warningMsg += `代碼 ${mergeConsecutiveCodes(notRegistered)} 不存在（未入庫） `;
+                if (alreadyUsed.length > 0) warningMsg += `代碼 ${mergeConsecutiveCodes(alreadyUsed)} 已被登記使用過！`;
+                
+                if (warningMsg) {
+                    usageWarning.innerHTML = `<span style="color:#e67e00;">${warningMsg}</span>`;
                     usageWarning.style.display = 'block';
                 } else {
                     usageWarning.style.display = 'none';
@@ -2337,13 +2347,33 @@
             const res = await fetchWithRetry(`${API_URL}?action=checkUsage&codes=${encodeURIComponent(JSON.stringify(codes))}`);
             const data = await res.json();
             if (itemCurrentUseCodes[n] !== codes) return;
-            if (data.usedCodes && data.usedCodes.length > 0) {
-                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:red">偵測到重複代碼 (${data.usedCodes.length} 張)</span>`;
-                if (usageWarning) { usageWarning.innerHTML = `<strong>警語：代碼 ${mergeConsecutiveCodes(data.usedCodes)} 已被登記使用過！確認要再登記？</strong>`; usageWarning.style.display = 'block'; }
-            } else {
-                if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#28a745;">未使用</span>`;
-                if (usageWarning) usageWarning.style.display = 'none';
+            
+            const usedCount = (data.usedCodes || []).length;
+            const notRegCount = (data.notRegisteredCodes || []).length;
+            
+            let statusHtml = '';
+            if (notRegCount > 0) {
+                statusHtml += `<span style="color:#e67e00;">不存在（未入庫）(${notRegCount} 張)</span>`;
             }
+            if (usedCount > 0) {
+                if (statusHtml) statusHtml += ' | ';
+                statusHtml += `<span style="color:red">偵測到重複代碼 (${usedCount} 張)</span>`;
+            }
+            
+            if (!statusHtml) {
+                statusHtml = `<span style="color:#28a745;">未使用</span>`;
+                if (usageWarning) usageWarning.style.display = 'none';
+            } else {
+                if (pUsageStatus) pUsageStatus.innerHTML = statusHtml;
+                if (usageWarning) {
+                    let warningMsg = '';
+                    if (notRegCount > 0) warningMsg += `代碼 ${mergeConsecutiveCodes(data.notRegisteredCodes)} 不存在（未入庫） `;
+                    if (usedCount > 0) warningMsg += `代碼 ${mergeConsecutiveCodes(data.usedCodes)} 已被登記使用過！`;
+                    usageWarning.innerHTML = `<strong>警語：${warningMsg} 確認要再登記？</strong>`;
+                    usageWarning.style.display = 'block';
+                }
+            }
+            if (pUsageStatus && statusHtml) pUsageStatus.innerHTML = statusHtml;
         } catch (err) {
             if (pUsageStatus) pUsageStatus.innerHTML = `<span style="color:#e6a700;">使用狀態檢查失敗（可重整預覽重試），不影響出庫</span>`;
         }
@@ -2404,7 +2434,83 @@
         // V3.7.5: 不檢查使用狀態，已使用不影響再出庫（第1次→G/H/I，第2次→J/K/L，第3次→V/W/X）
         // 直接通過，不做任何使用狀態驗證
 
-        // 清空表單（全部品項）並重新套用預設值
+        // 逐品項提交（各自獨立的 Task Center 條目）
+        // 重要：必須在清空表單前完成提交，確保資料完整性
+        for (const item of itemsToSubmit) {
+            try {
+                const { codes, match, n, useMode } = item;
+                // 確保 originalCodes 有值
+                const originalCodes = (itemCurrentOriginalCodes && itemCurrentOriginalCodes[n]) ? itemCurrentOriginalCodes[n] : codes;
+                const expiry = calculateExpiryDate(match.rule1);
+                const processId = generateProcessId();
+                const startTime = new Date();
+                const usePayload = { 
+                    mode: 'use', 
+                    user: currentUser, 
+                    channel: channel,
+                    payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
+                    allCodes: codes,
+                    useMode: useMode, // 記錄原始輸入模式
+                    recordInfo: {
+                        supplier: match.supplier,
+                        gift: match.name,
+                        start: codes[0],
+                        end: codes[codes.length-1],
+                        count: codes.length,
+                        orderNo: orderNo,
+                        expiry: expiry,
+                        channel: channel,
+                        reportMonth: reportMonth,
+                        useMode: useMode
+                    }
+                };
+
+                if (isOfflineMode) {
+                    // 離線模式：存入本地佇列，更新本地快取
+                    addToOfflineQueue({
+                        type: 'use',
+                        payload: usePayload,
+                        description: `出庫: ${match.supplier} - ${match.name} (${codes.length}張) 訂單:${orderNo}`,
+                        codes: codes,
+                        orderNo: orderNo,
+                        supplier: match.supplier,
+                        gift: match.name,
+                        channel: channel,
+                        reportMonth: reportMonth,
+                        user: currentUser
+                    });
+                    // 更新本地快取：標記為已使用
+                    codes.forEach(c => {
+                        const canon = canonCodeLocal(c);
+                        if (localUsedSet) localUsedSet.add(canon);
+                        if (localCodeIndex) delete localCodeIndex[canon];
+                    });
+                    showToast(`離線模式: 已暫存出庫記錄 (${codes.length}張)`);
+                } else {
+                    // 呼叫 addProcessingStatus 加入任務監控
+                    addProcessingStatus(
+                        processId, 
+                        orderNo, 
+                        codes.length, 
+                        match.supplier, 
+                        match.name, 
+                        startTime, 
+                        originalCodes[0], 
+                        originalCodes[originalCodes.length - 1], 
+                        usePayload, 
+                        'outbound', 
+                        codes, 
+                        originalCodes,
+                        useMode
+                    );
+                }
+            } catch (e) {
+                console.error("提交品項時發生錯誤:", e);
+                alert("提交品項時發生錯誤: " + e.message);
+            }
+        }
+
+        // 提交完成後再清空表單（全部品項）並重新套用預設值
         document.getElementById('useOrderNo').value = "";
         // 重新套用 Report月份預設值
         const defRpt = getDefaultReportMonth();
@@ -2427,6 +2533,7 @@
             itemLastDetectInfos[n] = null;
             itemCurrentUseCodes[n] = null;
             itemCurrentUseMatches[n] = null;
+            if (itemCurrentOriginalCodes && itemCurrentOriginalCodes[n]) itemCurrentOriginalCodes[n] = null;
         }
         lastDetectedCode = null;
         window.currentUseCodes = null;
@@ -2443,60 +2550,6 @@
 
         // 自動跳到訂單號欄位方便繼續下一個
         document.getElementById('useOrderNo').focus();
-
-        // 逐品項提交（各自獨立的 Task Center 條目）
-        for (const item of itemsToSubmit) {
-            const { codes, match, n, useMode } = item;
-            const originalCodes = itemCurrentOriginalCodes[n] || codes;
-            const expiry = calculateExpiryDate(match.rule1);
-            const processId = generateProcessId();
-            const startTime = new Date();
-            const usePayload = { 
-                mode: 'use', 
-                user: currentUser, 
-                channel: channel,
-                payload: codes.map(c => ({Code: c, OrderNo: orderNo})),
-                allCodes: codes,
-                useMode: useMode, // 記錄原始輸入模式
-                recordInfo: {
-                    supplier: match.supplier,
-                    gift: match.name,
-                    start: codes[0],
-                    end: codes[codes.length-1],
-                    count: codes.length,
-                    orderNo: orderNo,
-                    expiry: expiry,
-                    channel: channel,
-                    reportMonth: reportMonth,
-                    useMode: useMode
-                }
-            };
-
-            if (isOfflineMode) {
-                // 離線模式：存入本地佇列，更新本地快取
-                addToOfflineQueue({
-                    type: 'use',
-                    payload: usePayload,
-                    description: `出庫: ${match.supplier} - ${match.name} (${codes.length}張) 訂單:${orderNo}`,
-                    codes: codes,
-                    orderNo: orderNo,
-                    supplier: match.supplier,
-                    gift: match.name,
-                    channel: channel,
-                    reportMonth: reportMonth,
-                    user: currentUser
-                });
-                // 更新本地快取：標記為已使用
-                codes.forEach(c => {
-                    const canon = canonCodeLocal(c);
-                    if (localUsedSet) localUsedSet.add(canon);
-                    if (localCodeIndex) delete localCodeIndex[canon];
-                });
-                showToast(`離線模式: 已暫存出庫記錄 (${codes.length}張)`);
-            } else {
-                addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, originalCodes[0], originalCodes[originalCodes.length - 1], usePayload, 'outbound', codes, originalCodes);
-            }
-        }
     }
 
     function mergeConsecutiveCodes(codes) {
