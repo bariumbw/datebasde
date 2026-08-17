@@ -2380,62 +2380,19 @@
         for (const n of activeIndices) {
             const codes = itemCurrentUseCodes[n];
             const match = itemCurrentUseMatches[n];
+            const originalCodes = itemCurrentOriginalCodes[n] || codes;
             if (!codes || codes.length === 0 || !match) {
                 alert(`品項 ${n + 1} 尚未完成設定（請確認已選擇供應商/項目並輸入代碼）`);
                 return;
             }
             const warningEl = useEl('usageWarning', n);
             const hasDup = warningEl && warningEl.style.display === 'block';
-            itemsToSubmit.push({ n, codes, match, hasDup });
+            itemsToSubmit.push({ n, codes, originalCodes, match, hasDup });
         }
-
-        // V3.7.5: 不檢查使用狀態，已使用不影響再出庫（第1次→G/H/I，第2次→J/K/L，第3次→V/W/X）
-        // 直接通過，不做任何使用狀態驗證
-
-        // 清空表單（全部品項）並重新套用預設值
-        document.getElementById('useOrderNo').value = "";
-        // 重新套用 Report月份預設值
-        const defRpt = getDefaultReportMonth();
-        if (defRpt) {
-            document.getElementById('useReportYear').value = defRpt.year;
-            document.getElementById('useReportMonth').value = defRpt.month;
-        }
-        // 重新套用 Role-based 預設（渠道 + 面板狀態）
-        applyRoleDefaults();
-        for (const n of activeIndices) {
-            const startEl = useEl('useStart', n); if (startEl) startEl.value = '';
-            const endEl = useEl('useEnd', n); if (endEl) endEl.value = '';
-            const codesEl = useEl('useCodes', n); if (codesEl) codesEl.value = '';
-            const supEl = useEl('useSupplierSelect', n); if (supEl) supEl.value = '';
-            const giftEl = useEl('useGiftSelect', n); if (giftEl) giftEl.innerHTML = '<option value="">請選擇</option>';
-            const pb = useEl('previewBox', n); if (pb) pb.style.display = 'none';
-            setDetectStatusN(n, 'clear');
-            const qc = useEl('useQuickCount', n); if (qc) qc.innerText = '';
-            itemLastDetectedCodes[n] = null;
-            itemLastDetectInfos[n] = null;
-            itemCurrentUseCodes[n] = null;
-            itemCurrentUseMatches[n] = null;
-        }
-        lastDetectedCode = null;
-        window.currentUseCodes = null;
-        window.currentUseMatch = null;
-
-        // 移除額外品項區塊（保留品項 0）
-        const container = document.getElementById('useItemsContainer');
-        container.querySelectorAll('.use-item-block').forEach(block => {
-            if (parseInt(block.getAttribute('data-item-index')) !== 0) block.remove();
-        });
-        useItemCount = 1;
-        document.getElementById('addItemBtn').disabled = false;
-        updateUseItemsSummary();
-
-        // 自動跳到訂單號欄位方便繼續下一個
-        document.getElementById('useOrderNo').focus();
 
         // 逐品項提交（各自獨立的 Task Center 條目）
         for (const item of itemsToSubmit) {
-            const { codes, match, n } = item;
-            const originalCodes = itemCurrentOriginalCodes[n] || codes;
+            const { codes, originalCodes, match, n } = item;
             const expiry = calculateExpiryDate(match.rule1);
             const processId = generateProcessId();
             const startTime = new Date();
@@ -2483,6 +2440,42 @@
                 addProcessingStatus(processId, orderNo, codes.length, match.supplier, match.name, startTime, originalCodes[0], originalCodes[originalCodes.length - 1], usePayload, 'outbound', codes, originalCodes);
             }
         }
+
+        // 提交後才清空表單（全部品項）並重新套用預設值
+        document.getElementById('useOrderNo').value = "";
+        const defRpt = getDefaultReportMonth();
+        if (defRpt) {
+            document.getElementById('useReportYear').value = defRpt.year;
+            document.getElementById('useReportMonth').value = defRpt.month;
+        }
+        applyRoleDefaults();
+        for (const n of activeIndices) {
+            const startEl = useEl('useStart', n); if (startEl) startEl.value = '';
+            const endEl = useEl('useEnd', n); if (endEl) endEl.value = '';
+            const codesEl = useEl('useCodes', n); if (codesEl) codesEl.value = '';
+            const supEl = useEl('useSupplierSelect', n); if (supEl) supEl.value = '';
+            const giftEl = useEl('useGiftSelect', n); if (giftEl) giftEl.innerHTML = '<option value="">請選擇</option>';
+            const pb = useEl('previewBox', n); if (pb) pb.style.display = 'none';
+            setDetectStatusN(n, 'clear');
+            const qc = useEl('useQuickCount', n); if (qc) qc.innerText = '';
+            itemLastDetectedCodes[n] = null;
+            itemLastDetectInfos[n] = null;
+            itemCurrentUseCodes[n] = null;
+            itemCurrentOriginalCodes[n] = null;
+            itemCurrentUseMatches[n] = null;
+        }
+        lastDetectedCode = null;
+        window.currentUseCodes = null;
+        window.currentUseMatch = null;
+
+        const container = document.getElementById('useItemsContainer');
+        container.querySelectorAll('.use-item-block').forEach(block => {
+            if (parseInt(block.getAttribute('data-item-index')) !== 0) block.remove();
+        });
+        useItemCount = 1;
+        document.getElementById('addItemBtn').disabled = false;
+        updateUseItemsSummary();
+        document.getElementById('useOrderNo').focus();
     }
 
     function mergeConsecutiveCodes(codes) {
@@ -2635,6 +2628,9 @@
         processingStatuses.waiting.push(task);
         updateStatusDisplay();
         
+        const originalCodeStart = (originalCodes && originalCodes.length > 0) ? originalCodes[0] : (codeStart || '');
+        const originalCodeEnd = (originalCodes && originalCodes.length > 0) ? originalCodes[originalCodes.length - 1] : (codeEnd || '');
+        
         logTaskToSheet({
             taskId: id,
             taskType: supplier === '啟用作業' ? '啟用' : (finalOrderNo.startsWith('入庫') ? '入庫' : '出庫'),
@@ -2646,10 +2642,13 @@
             status: '排隊中',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
+            originalCodeStart: originalCodeStart,
+            originalCodeEnd: originalCodeEnd,
             channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : (retryPayload ? retryPayload.channel || '' : ''),
             reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : (retryPayload ? retryPayload.reportMonth || '' : ''),
             sourceType: finalSourceType,
-            allCodes: finalAllCodes
+            allCodes: finalAllCodes,
+            originalCodes: originalCodes || []
         });
 
         processQueue();
@@ -2678,8 +2677,9 @@
             codeEnd: task.codeEnd,
             originalCodeStart: task.originalCodeStart,
             originalCodeEnd: task.originalCodeEnd,
-            channel: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.channel || '' : (task.retryPayload ? task.retryPayload.channel || '' : ''),
-            reportMonth: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.reportMonth || '' : (task.retryPayload ? task.reportMonth || '' : ''),
+            originalCodes: task.originalCodes,
+            channel: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.channel || '' : (task.retryPayload ? task.channel || '' : ''),
+            reportMonth: (task.retryPayload && task.retryPayload.reportMonth) ? task.retryPayload.reportMonth : (task.retryPayload && task.retryPayload.recordInfo ? task.retryPayload.recordInfo.reportMonth : ''),
             sourceType: task.sourceType,
             allCodes: task.allCodes
         });
@@ -2996,8 +2996,8 @@
     }
 
     function formatCodeRange(item) {
-        const start = item.originalCodeStart || item.codeStart;
-        const end = item.originalCodeEnd || item.codeEnd;
+        const start = item.originalCodeStart || item.codeStart || '';
+        const end = item.originalCodeEnd || item.codeEnd || '';
         if (start && end && start !== end) {
             return `代碼: ${start} ~ ${end}`;
         } else if (start) {
@@ -4152,7 +4152,7 @@
             const codeStart = codes[0] || '';
             const codeEnd = codes[codes.length - 1] || '';
 
-            addProcessingStatus(processId, orderNo, qty, supplier, giftName, startTime, codeStart, codeEnd, payload, 'outbound', codes);
+            addProcessingStatus(processId, orderNo, qty, supplier, giftName, startTime, codeStart, codeEnd, payload, 'outbound', codes, codes);
             
             return fetchWithRetry(API_URL, { method: 'POST', body: JSON.stringify(payload) })
                 .then(r => r.json())
