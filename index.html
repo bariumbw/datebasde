@@ -263,9 +263,12 @@
 
             <!-- 禮券使用 -->
             <div id="usePage" class="page active">
-                <h2 style="display:flex; align-items:center; gap:12px;">禮券使用 (出庫) 
-                    <button class="icon-btn" onclick="manualUpdateCodeIndex()" title="刷新快取">↻</button>
-                    <button class="icon-btn" onclick="triggerFixUsageCache()" title="同步快取">⚙</button>
+                <h2 style="display:flex; align-items:center; justify-content:space-between;">
+                    禮券使用 (出庫) 
+                    <div style="display:flex; gap:10px;">
+                        <button class="icon-btn" onclick="manualUpdateCodeIndex()" title="刷新快取">↻</button>
+                        <button class="icon-btn" onclick="triggerFixUsageCache()" title="同步快取">⚙</button>
+                    </div>
                 </h2>
                 <div id="problemItemBanner" style="display:none; margin-bottom:12px; padding:10px 14px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px;">
                     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
@@ -613,9 +616,12 @@
 
             <!-- 每日報告 -->
             <div id="dailyReportPage" class="page">
-                <h2 style="display:flex; align-items:center; gap:12px;">每日報告
-                    <button class="icon-btn" onclick="loadDailyReport()" title="刷新">↻</button>
-                    <button class="icon-btn" onclick="triggerFixUsageCache()" title="同步快取">⚙</button>
+                <h2 style="display:flex; align-items:center; justify-content:space-between;">
+                    每日報告
+                    <div style="display:flex; gap:10px;">
+                        <button class="icon-btn" onclick="loadDailyReport()" title="刷新">↻</button>
+                        <button class="icon-btn" onclick="triggerFixUsageCache()" title="同步快取">⚙</button>
+                    </div>
                 </h2>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:15px;">
                     <label>日期：<input type="date" id="drDate" style="padding:5px 8px; border:1px solid #ccc; border-radius:6px;"></label>
@@ -629,9 +635,12 @@
 
             <!-- 盤點作業 -->
             <div id="stockTakePage" class="page">
-                <h2 style="display:flex; align-items:center; gap:12px;">盤點作業
-                    <button class="icon-btn" onclick="refreshStockTakeData()" title="刷新">↻</button>
-                    <button class="icon-btn" onclick="triggerFixUsageCache()" title="同步快取">⚙</button>
+                <h2 style="display:flex; align-items:center; justify-content:space-between;">
+                    盤點作業
+                    <div style="display:flex; gap:10px;">
+                        <button class="icon-btn" onclick="refreshStockTakeData()" title="刷新">↻</button>
+                        <button class="icon-btn" onclick="triggerFixUsageCache()" title="同步快取">⚙</button>
+                    </div>
                 </h2>
                 <div class="filter-bar">
                     <div class="form-group"><label>供應商</label><select id="stSupplier" onchange="updateStGiftMenu()"><option value="">請選擇</option></select></div>
