@@ -943,12 +943,12 @@
     // POST 請求（寫入操作）不重試，避免重複寫入
     async function fetchWithRetry(url, options, maxRetries = 2) {
         const isPost = options && options.method && options.method.toUpperCase() === 'POST';
-        const retries = isPost ? 0 : maxRetries; // POST 不重試
+        // V3.7.7: Failed to fetch 通常是連線未建立，重試是安全的；HTTP 錯誤則 POST 不重試
         let lastError;
-        for (let attempt = 0; attempt <= retries; attempt++) {
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), isPost ? 300000 : 90000); // POST 5分鐘，GET 90秒
+                const timeoutId = setTimeout(() => controller.abort(), isPost ? 300000 : 90000);
                 const opts = { ...options, signal: controller.signal };
                 const res = await fetch(url, opts);
                 clearTimeout(timeoutId);
@@ -956,9 +956,15 @@
                 return res;
             } catch (err) {
                 lastError = err;
+                const isNetworkError = err.name === 'TypeError' && err.message === 'Failed to fetch';
+                // 如果是 POST 且不是網路錯誤（即請求已發出但伺服器報錯），則不重試
+                if (isPost && !isNetworkError) break;
+                
                 console.warn(`fetchWithRetry attempt ${attempt + 1} failed:`, err.message);
-                if (attempt < retries) {
-                    await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); // 遞增等待
+                if (attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+                } else {
+                    break;
                 }
             }
         }
@@ -4711,22 +4717,39 @@
         status.textContent = '';
         status.style.color = '#666';
 
+        // 避免資料過大導致 Failed to fetch 或超時，每 100 個一組分批提交
+        const chunkSize = 100;
+        let totalSuccess = 0;
+        let errorMsg = '';
+
         try {
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: 'batchActivate', codes: codes })
-            });
-            const result = await res.json();
-            if (result.result === 'success') {
+            for (let i = 0; i < codes.length; i += chunkSize) {
+                const chunk = codes.slice(i, i + chunkSize);
+                status.textContent = `啟用中 (${i + 1} ~ ${Math.min(i + chunkSize, codes.length)} / ${codes.length})...`;
+                
+                const res = await fetchWithRetry(API_URL, {
+                    method: 'POST',
+                    // V3.7.7: 移除 Content-Type: application/json 以避免觸發 OPTIONS 預檢請求 (CORS)
+                    body: JSON.stringify({ mode: 'batchActivate', codes: chunk })
+                });
+                const result = await res.json();
+                if (result.result === 'success') {
+                    totalSuccess += (result.count !== undefined ? result.count : chunk.length);
+                } else {
+                    errorMsg = result.message || '未知錯誤';
+                    break;
+                }
+            }
+
+            if (!errorMsg) {
                 btn.textContent = '✓ 已啟用';
                 btn.style.background = '#34c759';
-                status.textContent = `成功啟用 ${result.count || codes.length} 個代碼`;
+                status.textContent = `成功啟用 ${totalSuccess} 個代碼`;
                 status.style.color = '#34c759';
             } else {
                 btn.textContent = '啟用代碼';
                 btn.disabled = false;
-                status.textContent = `失敗: ${result.message || '未知錯誤'}`;
+                status.textContent = `失敗: ${errorMsg}`;
                 status.style.color = 'red';
             }
         } catch (e) {
@@ -4869,8 +4892,16 @@
         
         showLoading();
         try {
-            const url = `${API_URL}?action=stockTakeCompare&supplier=${encodeURIComponent(supplier)}&gift=${encodeURIComponent(gift)}&codes=${encodeURIComponent(JSON.stringify(allCodes))}`;
-            const res = await fetchWithRetry(url);
+            // V3.7.7: 改用 POST 提交以處理大量代碼
+            const res = await fetchWithRetry(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode: 'stockTakeCompare',
+                    supplier: supplier,
+                    gift: gift,
+                    codes: allCodes
+                })
+            });
             const data = await res.json();
             if (data.result === 'success') {
                 displayStResult(data);
