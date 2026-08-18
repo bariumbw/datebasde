@@ -721,9 +721,12 @@
 
     <!-- 右側狀態面板 -->
     <div class="status-panel" id="statusPanel">
-        <h3 style="display:flex; align-items:center; justify-content:space-between;">
+        <h3 style="display:flex; align-items:center; justify-content:space-between; flex-wrap: wrap; gap: 8px;">
             處理監控
-            <button class="icon-btn" onclick="loadTaskMonitor()" title="刷新監控" style="width:28px; height:28px; font-size:14px; background:var(--primary-blue); color:#fff; border:none; border-radius:50%; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">↻</button>
+            <div style="display:flex; gap:6px;">
+                <button id="toggleAllUsersBtn" onclick="toggleShowAllUsers()" style="font-size:11px; padding:2px 8px; border-radius:12px; border:none; background:#0984e3; color:white; cursor:pointer;">👥 查看全員</button>
+                <button class="icon-btn" onclick="loadTaskMonitor()" title="刷新監控" style="width:26px; height:26px; font-size:12px; background:var(--primary-blue); color:#fff; border:none; border-radius:50%; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">↻</button>
+            </div>
         </h3>
         
         <div class="status-panel-upper">
@@ -757,7 +760,17 @@
     // 注意：如果出現 HTTP 404，請檢查 GAS 是否已重新部署，並更新下方的 API_URL
     const API_URL = "https://script.google.com/macros/s/AKfycbz204lvAxrDQULeXu708KVDS_hmXRRQ6aEUNhH1QtJmQSkzOkHjISkJZbJ96S6TxeWORA/exec";
     
-    let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true;
+    let giftDatabase = [], currentUser = "", currentBatch = "", sortDesc = true, showAllUsersTasks = false;
+    
+    function toggleShowAllUsers() {
+        showAllUsersTasks = !showAllUsersTasks;
+        const btn = document.getElementById('toggleAllUsersBtn');
+        if (btn) {
+            btn.innerHTML = showAllUsersTasks ? '👤 僅看自己' : '👥 查看全員';
+            btn.style.background = showAllUsersTasks ? '#6c757d' : '#0984e3';
+        }
+        updateStatusDisplay();
+    }
     let currentRole = 'Staff'; // 預設 Staff，登入後從後端取得
     let recordsCache = [], currentTypeFilter = "";
     let batchRptMode = false;
@@ -2450,7 +2463,7 @@
             }
         }
 
-        // 提交後才清空表單（全部品項）並重新套用預設值
+        // V3.7.14 優化：立即清空表單，讓用戶能立刻開始下一筆登記
         document.getElementById('useOrderNo').value = "";
         const defRpt = getDefaultReportMonth();
         if (defRpt) {
@@ -2473,6 +2486,8 @@
             itemCurrentOriginalCodes[n] = null;
             itemCurrentUseMatches[n] = null;
         }
+        // 自動跳回訂單號輸入框，方便連續操作
+        document.getElementById('useOrderNo').focus();
         lastDetectedCode = null;
         window.currentUseCodes = null;
         window.currentUseMatch = null;
@@ -2622,10 +2637,11 @@
 
     const TASK_STATUS_TEXT = { waiting: '排隊中', processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
-    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes, originalCodes) {
+    function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes, originalCodes, useMode) {
         const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
         const finalSourceType = sourceType || 'outbound';
         const finalAllCodes = allCodes || [];
+        const finalUseMode = useMode || (document.getElementById('useMode') ? document.getElementById('useMode').value : 'range');
 
         const task = {
             id: id,
@@ -2633,7 +2649,7 @@
             count: count,
             supplier: supplier,
             gift: gift,
-            startTime: null, 
+            startTime: new Date(), 
             status: 'waiting',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
@@ -2643,69 +2659,65 @@
             retryPayload: retryPayload || null,
             sourceType: finalSourceType,
             allCodes: finalAllCodes,
-            originalCodes: originalCodes || []
-        };
-
-        processingStatuses.waiting.push(task);
-        updateStatusDisplay();
-        
-        const originalCodeStart = (originalCodes && originalCodes.length > 0) ? originalCodes[0] : (codeStart || '');
-        const originalCodeEnd = (originalCodes && originalCodes.length > 0) ? originalCodes[originalCodes.length - 1] : (codeEnd || '');
-        
-        logTaskToSheet({
-            taskId: id,
-            taskType: supplier === '啟用作業' ? '啟用' : (finalOrderNo.startsWith('入庫') ? '入庫' : '出庫'),
-            description: finalOrderNo,
-            detail: supplier + ' - ' + gift,
-            count: count,
-            user: currentUser,
-            startTime: new Date(),
-            status: '排隊中',
-            codeStart: codeStart || '',
-            codeEnd: codeEnd || '',
-            originalCodeStart: originalCodeStart,
-            originalCodeEnd: originalCodeEnd,
-            channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : (retryPayload ? retryPayload.channel || '' : ''),
-            reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : (retryPayload ? retryPayload.reportMonth || '' : ''),
-            sourceType: finalSourceType,
-            allCodes: finalAllCodes,
             originalCodes: originalCodes || [],
             useMode: finalUseMode
-        });
+        };
 
-        processQueue();
+        if (processingStatuses.processing.length < MAX_CONCURRENT_TASKS) {
+            task.status = 'processing';
+            processingStatuses.processing.push(task);
+            updateStatusDisplay();
+            
+            logTaskToSheet({
+                taskId: id,
+                taskType: supplier === '啟用作業' ? '啟用' : (finalOrderNo.startsWith('入庫') ? '入庫' : '出庫'),
+                description: finalOrderNo,
+                detail: supplier + ' - ' + gift,
+                count: count,
+                user: currentUser,
+                startTime: task.startTime,
+                status: '處理中',
+                codeStart: codeStart || '',
+                codeEnd: codeEnd || '',
+                originalCodeStart: task.originalCodeStart,
+                originalCodeEnd: task.originalCodeEnd,
+                originalCodes: task.originalCodes,
+                useMode: finalUseMode,
+                channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : (retryPayload ? retryPayload.channel || '' : ''),
+                reportMonth: (retryPayload && retryPayload.reportMonth) ? retryPayload.reportMonth : (retryPayload && retryPayload.recordInfo ? retryPayload.recordInfo.reportMonth : ''),
+                sourceType: finalSourceType,
+                allCodes: finalAllCodes
+            });
+
+            executeTask(task);
+        } else {
+            processingStatuses.waiting.push(task);
+            updateStatusDisplay();
+            
+            logTaskToSheet({
+                taskId: id,
+                taskType: supplier === '啟用作業' ? '啟用' : (finalOrderNo.startsWith('入庫') ? '入庫' : '出庫'),
+                description: finalOrderNo,
+                detail: supplier + ' - ' + gift,
+                count: count,
+                user: currentUser,
+                startTime: task.startTime,
+                status: '排隊中',
+                codeStart: codeStart || '',
+                codeEnd: codeEnd || '',
+                originalCodeStart: task.originalCodeStart,
+                originalCodeEnd: task.originalCodeEnd,
+                originalCodes: task.originalCodes,
+                useMode: finalUseMode,
+                channel: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.channel || '' : (retryPayload ? retryPayload.channel || '' : ''),
+                reportMonth: (retryPayload && retryPayload.reportMonth) ? retryPayload.reportMonth : (retryPayload && retryPayload.recordInfo ? retryPayload.recordInfo.reportMonth : ''),
+                sourceType: finalSourceType,
+                allCodes: finalAllCodes
+            });
+        }
     }
 
-    async function processQueue() {
-        if (processingStatuses.processing.length >= MAX_CONCURRENT_TASKS) return;
-        if (processingStatuses.waiting.length === 0) return;
-
-        const task = processingStatuses.waiting.shift();
-        task.status = 'processing';
-        task.startTime = new Date();
-        processingStatuses.processing.push(task);
-        updateStatusDisplay();
-
-        logTaskToSheet({ 
-            taskId: task.id, 
-            status: '處理中', 
-            startTime: task.startTime,
-            taskType: task.supplier === '啟用作業' ? '啟用' : (task.orderNo.startsWith('入庫') ? '入庫' : '出庫'),
-            description: task.orderNo,
-            detail: task.supplier + ' - ' + task.gift,
-            count: task.count,
-            user: task.user,
-            codeStart: task.codeStart,
-            codeEnd: task.codeEnd,
-            originalCodeStart: task.originalCodeStart,
-            originalCodeEnd: task.originalCodeEnd,
-            originalCodes: task.originalCodes,
-            channel: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.channel || '' : (task.retryPayload ? task.channel || '' : ''),
-            reportMonth: (task.retryPayload && task.retryPayload.reportMonth) ? task.retryPayload.reportMonth : (task.retryPayload && task.retryPayload.recordInfo ? task.retryPayload.recordInfo.reportMonth : ''),
-            sourceType: task.sourceType,
-            allCodes: task.allCodes
-        });
-
+    async function executeTask(task) {
         try {
             const res = await fetchWithRetry(API_URL, { 
                 method: "POST", 
@@ -2745,11 +2757,47 @@
                     }
                 } catch (e) {
                     updateProcessingStatus(task.id, 'problem', task.startTime, "連線中斷且無法進行二次確認: " + err.message);
+                } finally {
+                    processQueue(); // 確保二次確認後也觸發下一個任務
                 }
             }, 3000);
         } finally {
             processQueue(); 
         }
+    }
+
+    async function processQueue() {
+        if (processingStatuses.processing.length >= MAX_CONCURRENT_TASKS) return;
+        if (processingStatuses.waiting.length === 0) return;
+
+        const task = processingStatuses.waiting.shift();
+        task.status = 'processing';
+        task.startTime = new Date();
+        processingStatuses.processing.push(task);
+        updateStatusDisplay();
+
+        logTaskToSheet({ 
+            taskId: task.id, 
+            status: '處理中', 
+            startTime: task.startTime,
+            taskType: task.supplier === '啟用作業' ? '啟用' : (task.orderNo.startsWith('入庫') ? '入庫' : '出庫'),
+            description: task.orderNo,
+            detail: task.supplier + ' - ' + task.gift,
+            count: task.count,
+            user: task.user,
+            codeStart: task.codeStart,
+            codeEnd: task.codeEnd,
+            originalCodeStart: task.originalCodeStart,
+            originalCodeEnd: task.originalCodeEnd,
+            originalCodes: task.originalCodes,
+            useMode: task.useMode,
+            channel: (task.retryPayload && task.retryPayload.recordInfo) ? task.retryPayload.recordInfo.channel || '' : (task.retryPayload ? task.retryPayload.channel || '' : ''),
+            reportMonth: (task.retryPayload && task.retryPayload.reportMonth) ? task.retryPayload.reportMonth : (task.retryPayload && task.retryPayload.recordInfo ? task.retryPayload.recordInfo.reportMonth : ''),
+            sourceType: task.sourceType,
+            allCodes: task.allCodes
+        });
+
+        executeTask(task);
     }
 
     function updateProcessingStatus(id, newStatus, startTime, errorMsg = '') {
@@ -3074,12 +3122,17 @@
         processingList.innerHTML = (processingStatuses.processing.length === 0 && processingStatuses.waiting.length === 0) ? '<p style="color:#999; font-size:12px;">無</p>' : '';
         
         // 顯示正在處理
-        processingStatuses.processing.forEach(item => {
-            const elapsed = ((new Date() - item.startTime) / 1000).toFixed(1);
+        const filterFn = item => showAllUsersTasks || !item.user || item.user === currentUser;
+        const currentProcessing = processingStatuses.processing.filter(filterFn);
+        const currentWaiting = processingStatuses.waiting.filter(filterFn);
+
+        currentProcessing.forEach(item => {
+            const elapsed = ((new Date() - new Date(item.startTime)) / 1000).toFixed(1);
             const codeInfo = formatCodeRange(item);
-            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
+            const isOther = item.user && item.user !== currentUser;
+            const userTag = item.user ? `<span style="font-size:11px; color:${isOther ? '#d63031' : '#888'}; font-weight:${isOther ? 'bold' : 'normal'}; margin-left:6px;">[${item.user}]</span>` : '';
             processingList.innerHTML += `
-                <div class="status-item processing">
+                <div class="status-item processing" style="${isOther ? 'border-left-color: #e17055; opacity: 0.9;' : ''}">
                     <div class="status-item-header">
                         訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time">${elapsed}s</span>
@@ -3093,11 +3146,12 @@
         });
 
         // 顯示排隊中
-        processingStatuses.waiting.forEach(item => {
+        currentWaiting.forEach(item => {
             const codeInfo = formatCodeRange(item);
-            const userTag = item.user ? `<span style="font-size:11px; color:#888; margin-left:6px;">[${item.user}]</span>` : '';
+            const isOther = item.user && item.user !== currentUser;
+            const userTag = item.user ? `<span style="font-size:11px; color:${isOther ? '#d63031' : '#888'}; font-weight:${isOther ? 'bold' : 'normal'}; margin-left:6px;">[${item.user}]</span>` : '';
             processingList.innerHTML += `
-                <div class="status-item waiting" style="border-left: 4px solid #adb5bd; background: #f8f9fa;">
+                <div class="status-item waiting" style="border-left: 4px solid #adb5bd; background: #f8f9fa; ${isOther ? 'opacity: 0.8;' : ''}">
                     <div class="status-item-header">
                         訂單: ${item.orderNo}${userTag}
                         <span class="status-item-time" style="background:#adb5bd;">排隊中</span>
@@ -3109,7 +3163,7 @@
                 </div>
             `;
         });
-        document.getElementById('processingCount').innerText = processingStatuses.processing.length + processingStatuses.waiting.length;
+        document.getElementById('processingCount').innerText = currentProcessing.length + currentWaiting.length;
 
         // 更新已完成
         const completedList = document.getElementById('completedList');
