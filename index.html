@@ -721,7 +721,10 @@
 
     <!-- 右側狀態面板 -->
     <div class="status-panel" id="statusPanel">
-        <h3>處理監控</h3>
+        <h3 style="display:flex; align-items:center; justify-content:space-between;">
+            處理監控
+            <button class="icon-btn" onclick="loadTaskMonitor()" title="刷新監控" style="width:28px; height:28px; font-size:14px; background:var(--primary-blue); color:#fff; border:none; border-radius:50%; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">↻</button>
+        </h3>
         
         <div class="status-panel-upper">
             <div class="status-section">
@@ -2574,13 +2577,23 @@
                     user: t.user || '',
                     retryPayload: reconstructedPayload,
                     sourceType: t.sourceType || 'outbound',
-                    allCodes: t.allCodes || []
+                    allCodes: t.allCodes || [],
+                    originalCodes: t.originalCodes || [],
+                    useMode: t.useMode || 'range'
                 };
                 if (t.status === '有問題' || t.status === 'problem') {
                     processingStatuses.problem.push(statusItem);
             } else if (t.status === '排隊中' || t.status === 'waiting') {
-                statusItem.status = 'waiting';
-                processingStatuses.waiting.push(statusItem);
+                // 檢查是否排隊過久（超過 5 分鐘未處理，視為異常/過期任務）
+                const elapsed = (new Date() - new Date(t.startTime)) / 1000;
+                if (elapsed > 300) {
+                    statusItem.status = 'problem';
+                    statusItem.errorMsg = statusItem.errorMsg || '排隊逾時（可能已異常終止，請重新載入到出庫）';
+                    processingStatuses.problem.push(statusItem);
+                } else {
+                    statusItem.status = 'waiting';
+                    processingStatuses.waiting.push(statusItem);
+                }
             } else if (t.status === '處理中' || t.status === 'processing') {
                 // 如果後端仍顯示處理中但已經過了很久，可能是異常終止，標記為問題
                 const elapsed = (new Date() - new Date(t.startTime)) / 1000;
@@ -2602,6 +2615,8 @@
                 }
             });
             updateStatusDisplay();
+            // V3.7.13: 載入後自動觸發隊列處理，確保「排隊中」的任務能被自動接手執行
+            processQueue();
         } catch (e) { /* 載入失敗不影響主流程 */ }
     }
 
@@ -2654,7 +2669,8 @@
             reportMonth: (retryPayload && retryPayload.recordInfo) ? retryPayload.recordInfo.reportMonth || '' : (retryPayload ? retryPayload.reportMonth || '' : ''),
             sourceType: finalSourceType,
             allCodes: finalAllCodes,
-            originalCodes: originalCodes || []
+            originalCodes: originalCodes || [],
+            useMode: finalUseMode
         });
 
         processQueue();
@@ -2755,9 +2771,14 @@
             status: newStatus,
             codeStart: item.codeStart || '',
             codeEnd: item.codeEnd || '',
+            originalCodeStart: item.originalCodeStart || '',
+            originalCodeEnd: item.originalCodeEnd || '',
+            originalCodes: item.originalCodes || [],
             retryPayload: item.retryPayload || null,
             sourceType: item.sourceType || 'outbound',
-            allCodes: item.allCodes || []
+            allCodes: item.allCodes || [],
+            useMode: item.useMode || 'range',
+            user: item.user || ''
         };
 
         if (newStatus === 'completed') {
@@ -2796,6 +2817,8 @@
             codeEnd: item.codeEnd,
             originalCodeStart: item.originalCodeStart,
             originalCodeEnd: item.originalCodeEnd,
+            originalCodes: item.originalCodes,
+            useMode: item.useMode,
             channel: (item.retryPayload && item.retryPayload.recordInfo) ? item.retryPayload.recordInfo.channel || '' : (item.retryPayload ? item.retryPayload.channel || '' : ''),
             reportMonth: (item.retryPayload && item.retryPayload.recordInfo) ? item.retryPayload.recordInfo.reportMonth || '' : (item.retryPayload ? item.reportMonth || '' : ''),
             sourceType: item.sourceType,
@@ -2823,24 +2846,57 @@
             // 載入到出庫
             const info = payload.recordInfo || {};
             switchPage('usePage');
-            document.getElementById('useOrderNo').value = info.orderNo || '';
+            
+            // 1. 基本資訊
+            document.getElementById('useOrderNo').value = info.orderNo || problem.orderNo || '';
+            
+            // 2. 供應商與項目 (先填入以觸發選單生成)
             const supEl = useEl('useSupplierSelect', 0);
-            if (supEl) supEl.value = info.supplier || '';
-            useUpdateGiftSelectN(0, info.gift || '');
-            // 填入完整代碼清單（優先）或首尾碼
-            const codesEl = useEl('useCodes', 0);
-            if (allCodes.length > 0 && codesEl) {
-                codesEl.value = allCodes.join('\n');
-                useSmartDetectDebouncedN(0);
+            if (supEl) {
+                supEl.value = info.supplier || problem.supplier || '';
+                useUpdateGiftSelectN(0, info.gift || problem.gift || '');
+            }
+
+            // 3. 判斷模式與代碼
+            const originalCodes = problem.originalCodes || [];
+            const origStart = problem.originalCodeStart || problem.codeStart || info.start || '';
+            const origEnd = problem.originalCodeEnd || problem.codeEnd || info.end || '';
+            // 如果有首尾碼，優先使用範圍模式；否則若代碼很多，使用清單模式
+            const useMode = problem.useMode || (origStart ? 'range' : (allCodes.length > 0 ? 'list' : 'range'));
+
+            // 設定模式 UI
+            const modeEl = useEl('useMode', 0);
+            if (modeEl) {
+                modeEl.value = useMode;
+                toggleUseModeN(0, useMode);
+            }
+
+            // 4. 填入代碼
+            if (useMode === 'list') {
+                const codesEl = useEl('useCodes', 0);
+                const targetCodes = originalCodes.length > 0 ? originalCodes : allCodes;
+                if (codesEl) {
+                    codesEl.value = targetCodes.join('\n');
+                    // 延遲觸發識別，確保 UI 已切換
+                    setTimeout(() => useSmartDetectListDebouncedN(0), 100);
+                }
             } else {
                 const startEl = useEl('useStart', 0);
                 const endEl = useEl('useEnd', 0);
-                if (startEl) startEl.value = info.start || '';
-                if (endEl) endEl.value = info.end || '';
-                if (startEl && startEl.value) { useSmartDetectDebouncedN(0); useUpdateRangeCountN(0); }
+                if (startEl) startEl.value = origStart;
+                if (endEl) endEl.value = origEnd;
+                if (startEl && startEl.value) {
+                    setTimeout(() => {
+                        useSmartDetectDebouncedN(0);
+                        useUpdateRangeCountN(0);
+                    }, 100);
+                }
             }
-            if (info.channel) {
-                const channelRadio = document.querySelector(`input[name="useChannel"][value="${info.channel}"]`);
+
+            // 5. 渠道與月份
+            if (info.channel || problem.channel) {
+                const chan = info.channel || problem.channel;
+                const channelRadio = document.querySelector(`input[name="useChannel"][value="${chan}"]`);
                 if (channelRadio) channelRadio.checked = true;
             }
             if (info.reportMonth) {
