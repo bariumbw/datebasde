@@ -172,7 +172,7 @@
                                 <th>未使用並已啟動</th>
                                 <th>總使用</th>
                                 <th>退回</th>
-                                <th>總入庫</th>
+                                <th>本月入庫</th>
                                 <th>退庫</th>
                             </tr>
                         </thead>
@@ -183,7 +183,12 @@
 
             <!-- 以品牌的統計 -->
             <div id="brandStatsPage" class="page">
-                <h2>以品牌的統計</h2>
+                <h2 style="display:flex; align-items:center; justify-content:space-between;">
+                    以品牌的統計
+                    <div style="display:flex; gap:10px;">
+                        <button class="icon-btn" onclick="refreshBrandStatsData()" title="刷新數據與清單">↻</button>
+                    </div>
+                </h2>
                 <div class="filter-bar">
                     <div class="form-group"><label>品牌 (供應商)</label><select id="brandStatSupplier" onchange="updateBrandStatGiftMenu()"><option value="">請選擇</option></select></div>
                     <div class="form-group"><label>項目</label><select id="brandStatGift"><option value="">請選擇</option></select></div>
@@ -1223,6 +1228,33 @@
         if (showLoader !== false) hideLoading();
     }
 
+    async function refreshBrandStatsData() {
+        showLoading();
+        try {
+            // 1. 先更新配置（品牌清單）
+            const res = await fetchWithRetry(`${API_URL}?action=getConfig`);
+            giftDatabase = await res.json();
+            initDropdowns();
+            
+            // 2. 如果當前已經選擇了品牌或項目，自動重新執行查詢以更新統計數據
+            const supplier = document.getElementById('brandStatSupplier').value;
+            const gift = document.getElementById('brandStatGift').value;
+            const rptY = document.getElementById('brandStatReportYear').value;
+            const rptM = document.getElementById('brandStatReportMonthSel').value;
+            const reportMonth = (rptY && rptM) ? `${rptY}-${rptM}` : '';
+            
+            if (supplier || gift || reportMonth) {
+                await loadBrandStats();
+                showToast('統計數據與品牌清單已同步更新');
+            } else {
+                showToast('品牌清單已更新');
+            }
+        } catch (err) {
+            alert('刷新失敗: ' + err.message);
+        }
+        hideLoading();
+    }
+
     async function loadBrandStats() {
         const supplier = document.getElementById('brandStatSupplier').value;
         const gift = document.getElementById('brandStatGift').value;
@@ -1266,7 +1298,7 @@
                 resultHtml += `<div style="margin-bottom:25px; padding:15px; background:#f8f9fa; border-radius:10px; border:1px solid #e0e0e0;">
                     <h3 style="margin:0 0 10px; color:#2d3436;">${q.supplier} - ${q.gift}</h3>
                     <table class="stats-table">
-                        <thead><tr><th>剩餘庫存</th><th>未使用並已啟動</th><th>總使用</th><th>門市+online</th><th>企業</th><th>快閃+禮卡展</th><th>婚展</th><th>總入庫</th><th>退回</th><th>退庫</th></tr></thead>
+                        <thead><tr><th>剩餘庫存</th><th>未使用並已啟動</th><th>總使用</th><th>門市+online</th><th>企業</th><th>快閃+禮卡展</th><th>婚展</th><th>本月入庫</th><th>退回</th><th>退庫</th></tr></thead>
                         <tbody><tr>
                             <td style="color:var(--primary-blue); font-weight:bold;">${data.stock}</td>
                             <td style="color:var(--warning-orange); font-weight:bold;">${data.activated}</td>
@@ -1298,13 +1330,33 @@
                             }).join('') : '<span style="color:#999;">無</span>'}
                         </div>
                     </div>
-                    <div style="margin-top:10px;"><div style="color:#0984e3; font-weight:bold; margin-bottom:6px;">記錄明細 (${data.records ? data.records.length : 0})</div>
-                        <div style="margin:8px 0 4px; text-align:right;"><button onclick="batchEditBrandRpt('${q.supplier}','${q.gift}')" style="font-size:12px; padding:4px 10px; background:#0984e3; color:white; border:none; border-radius:4px; cursor:pointer;">批量Report月份</button></div>
-                        <table class="stats-table" style="margin-top:4px;">
+                    <div style="margin-top:15px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <div style="color:#0984e3; font-weight:bold;">使用記錄明細 (${data.records ? data.records.filter(r => r.type === '使用').length : 0})</div>
+                            <button onclick="batchEditBrandRpt('${q.supplier}','${q.gift}')" style="font-size:12px; padding:4px 10px; background:#0984e3; color:white; border:none; border-radius:4px; cursor:pointer;">批量Report月份</button>
+                        </div>
+                        <table class="stats-table" style="margin-top:4px; border-left: 4px solid var(--success-green);">
                             <thead><tr><th>時間</th><th>類型</th><th>訂單號</th><th>數量</th><th>購買渠道</th><th>Report月份</th></tr></thead>
-                            <tbody>${data.records && data.records.length > 0 ? data.records.map((r, ri) => `<tr><td>${r.time}</td><td>${r.type}</td><td>${r.orderNo}</td><td>${r.count}</td><td>${r.channel || ''}</td><td><span id="brpt-${q.supplier}-${q.gift}-${ri}" onclick="editBrandRpt('${q.supplier}','${q.gift}',${ri},'${r.reportMonth || ''}')" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${r.reportMonth || '設定'}</span></td></tr>`).join('') : '<tr><td colspan="6" style="text-align:center; color:#999;">無記錄</td></tr>'}</tbody>
+                            <tbody>${data.records && data.records.filter(r => r.type === '使用').length > 0 ? data.records.map((r, ri) => r.type === '使用' ? `<tr><td>${r.time}</td><td>${r.type}</td><td>${r.orderNo}</td><td>${r.count}</td><td>${r.channel || ''}</td><td><span id="brpt-${q.supplier}-${q.gift}-${ri}" onclick="editBrandRpt('${q.supplier}','${q.gift}',${ri},'${r.reportMonth || ''}')" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${r.reportMonth || '設定'}</span></td></tr>` : '').join('') : '<tr><td colspan="6" style="text-align:center; color:#999;">無使用記錄</td></tr>'}</tbody>
                         </table>
                     </div>
+
+                    <div style="margin-top:20px;">
+                        <div style="color:#636e72; font-weight:bold; margin-bottom:8px;">登記記錄明細 (${data.records ? data.records.filter(r => r.type === '登記').length : 0})</div>
+                        <table class="stats-table" style="margin-top:4px; border-left: 4px solid var(--primary-blue);">
+                            <thead><tr><th>時間</th><th>類型</th><th>描述</th><th>數量</th><th>-</th><th>Report月份</th></tr></thead>
+                            <tbody>${data.records && data.records.filter(r => r.type === '登記').length > 0 ? data.records.map((r, ri) => r.type === '登記' ? `<tr><td>${r.time}</td><td>${r.type}</td><td>${r.orderNo}</td><td>${r.count}</td><td>-</td><td><span id="brpt-${q.supplier}-${q.gift}-${ri}" onclick="editBrandRpt('${q.supplier}','${q.gift}',${ri},'${r.reportMonth || ''}')" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${r.reportMonth || '設定'}</span></td></tr>` : '').join('') : '<tr><td colspan="6" style="text-align:center; color:#999;">無登記記錄</td></tr>'}</tbody>
+                        </table>
+                    </div>
+
+                    ${data.records && data.records.filter(r => r.type !== '使用' && r.type !== '登記').length > 0 ? `
+                    <div style="margin-top:20px;">
+                        <div style="color:#d63031; font-weight:bold; margin-bottom:8px;">其他記錄 (退回/退庫) (${data.records.filter(r => r.type !== '使用' && r.type !== '登記').length})</div>
+                        <table class="stats-table" style="margin-top:4px; border-left: 4px solid var(--danger-red);">
+                            <thead><tr><th>時間</th><th>類型</th><th>單號/原因</th><th>數量</th><th>-</th><th>Report月份</th></tr></thead>
+                            <tbody>${data.records.map((r, ri) => (r.type !== '使用' && r.type !== '登記') ? `<tr><td>${r.time}</td><td>${r.type}</td><td>${r.orderNo}</td><td>${r.count}</td><td>-</td><td><span id="brpt-${q.supplier}-${q.gift}-${ri}" onclick="editBrandRpt('${q.supplier}','${q.gift}',${ri},'${r.reportMonth || ''}')" style="cursor:pointer; color:#0984e3; text-decoration:underline;">${r.reportMonth || '設定'}</span></td></tr>` : '').join('')}</tbody>
+                        </table>
+                    </div>` : ''}
                 </div>`;
             }
             document.getElementById('brandStatsResult').innerHTML = resultHtml;
@@ -2572,7 +2624,18 @@
                 const detailParts = (t.detail || '').split(' - ');
                 const tSupplier = detailParts[0] || t.supplier || '未知供應商';
                 const tGift = detailParts[1] || t.gift || '未知項目';
-                const tOrderNo = t.description || t.orderNo || '無訂單號';
+                let tOrderNo = t.description || t.orderNo || '無訂單號';
+                // V3.7.19 修正：如果單號變成了日期物件（例如 Sun Dec 01 2171...），嘗試還原為 MM-YYYY
+                if (tOrderNo && (tOrderNo.includes('GMT') || tOrderNo.includes('Standard Time'))) {
+                    try {
+                        const d = new Date(tOrderNo);
+                        if (!isNaN(d.getTime())) {
+                            const mm = (d.getMonth() + 1).toString().padStart(2, '0');
+                            const yyyy = d.getFullYear();
+                            tOrderNo = `${mm}-${yyyy}`;
+                        }
+                    } catch(e) {}
+                }
                 const tStart = t.codeStart || '';
                 const tEnd = t.codeEnd || '';
                 const tOrigStart = t.originalCodeStart || '';
@@ -2655,7 +2718,19 @@
     const TASK_STATUS_TEXT = { waiting: '排隊中', processing: '處理中', completed: '已完成', problem: '有問題', solved: '問題已解決' };
 
     function addProcessingStatus(id, orderNo, count, supplier, gift, startTime, codeStart, codeEnd, retryPayload, sourceType, allCodes, originalCodes, useMode) {
-        const finalOrderNo = (orderNo instanceof Date) ? orderNo.toLocaleString() : String(orderNo || '');
+        // V3.7.18 修正：嚴格檢查 orderNo，如果是 Date 物件則從 meta 中嘗試恢復或使用 startTime
+        let finalOrderNo = "";
+        if (orderNo instanceof Date) {
+            // 如果誤傳了 Date，嘗試從 retryPayload 中恢復
+            if (retryPayload && retryPayload.recordInfo && retryPayload.recordInfo.orderNo) {
+                finalOrderNo = String(retryPayload.recordInfo.orderNo);
+            } else {
+                finalOrderNo = "未知單號";
+            }
+        } else {
+            finalOrderNo = String(orderNo || '');
+        }
+        
         const finalSourceType = sourceType || 'outbound';
         const finalAllCodes = allCodes || [];
         const finalUseMode = useMode || (document.getElementById('useMode') ? document.getElementById('useMode').value : 'range');
@@ -2666,7 +2741,7 @@
             count: count,
             supplier: supplier,
             gift: gift,
-            startTime: new Date(), 
+            startTime: (startTime instanceof Date) ? startTime : new Date(), 
             status: 'waiting',
             codeStart: codeStart || '',
             codeEnd: codeEnd || '',
