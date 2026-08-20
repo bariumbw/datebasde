@@ -195,7 +195,10 @@
                     <div class="form-group"><label>日期(起)</label><input type="date" id="brandStatStart"></div>
                     <div class="form-group"><label>日期(終)</label><input type="date" id="brandStatEnd"></div>
                     <div class="form-group"><label>Report月份</label><div style="display:flex; gap:4px;"><select id="brandStatReportYear"><option value="">年份</option></select><select id="brandStatReportMonthSel"><option value="">月份</option></select></div></div>
-                    <div class="form-group" style="display:flex; align-items:flex-end;"><button onclick="loadBrandStats()" style="width:100%;">查詢</button></div>
+                    <div class="form-group" style="display:flex; align-items:flex-end; gap:5px;">
+                        <button onclick="loadBrandStats()" style="flex:1;">查詢</button>
+                        <button class="icon-btn" onclick="refreshBrandStatsData()" style="height:38px; width:40px; font-size:18px;" title="刷新數據">↻</button>
+                    </div>
                 </div>
                 <div id="brandStatsResult" style="display:none; margin-top:15px;"></div>
             </div>
@@ -1243,14 +1246,16 @@
             const rptM = document.getElementById('brandStatReportMonthSel').value;
             const reportMonth = (rptY && rptM) ? `${rptY}-${rptM}` : '';
             
+            // 觸發重新查詢
             if (supplier || gift || reportMonth) {
                 await loadBrandStats();
-                showToast('統計數據與品牌清單已同步更新');
+                showToast('✅ 數據已更新至最新狀態');
             } else {
                 showToast('品牌清單已更新');
             }
         } catch (err) {
-            alert('刷新失敗: ' + err.message);
+            console.error('刷新失敗:', err);
+            showToast('❌ 刷新失敗，請重試', 'error');
         }
         hideLoading();
     }
